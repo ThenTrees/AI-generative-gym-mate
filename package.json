@@ -1,0 +1,57 @@
+{
+  "name": "gym-rag-service",
+  "version": "1.0.0",
+  "description": "AI RAG Service for Gym Workout Plans",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "nodemon --watch src --ext ts,tsx --exec ts-node app.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "generate-embeddings": "ts-node src/scripts/generateEmbeddings.ts"
+  },
+  "dependencies": {
+    "@langchain/community": "^0.3.56",
+    "@langchain/openai": "^0.6.13",
+    "axios": "^1.12.2",
+    "chalk": "^5.6.2",
+    "compression": "^1.8.1",
+    "cors": "^2.8.5",
+    "date-fns": "^2.30.0",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^7.2.0",
+    "joi": "^18.0.1",
+    "langchain": "^0.3.34",
+    "node-cron": "^4.2.1",
+    "openai": "^4.104.0",
+    "pg": "^8.16.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/body-parser": "^1.19.6",
+    "@types/chalk": "^0.4.31",
+    "@types/compression": "^1.8.1",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.23",
+    "@types/morgan": "^1.9.10",
+    "@types/node": "^20.19.17",
+    "@types/pg": "^8.15.5",
+    "install": "^0.13.0",
+    "morgan": "^1.10.1",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThenTrees/AI-generative-gym-mate.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ThenTrees/AI-generative-gym-mate/issues"
+  },
+  "homepage": "https://github.com/ThenTrees/AI-generative-gym-mate#readme"
+}
