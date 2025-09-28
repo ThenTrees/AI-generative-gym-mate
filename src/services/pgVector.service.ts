@@ -1,4 +1,5 @@
 import { Client, Pool } from "pg";
+import fs from "fs";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { DATABASE_CONFIG } from "../configs/database";
 import { Exercise } from "../types/model/exercise.model";
@@ -20,6 +21,7 @@ import { EmbeddingDocument } from "../types/model/embeddingDocument.model";
 import { PlanDay } from "../types/model/planDay.model";
 import { logger } from "../utils/logger";
 import { config } from "../configs/environment";
+import path from "path";
 
 export class PgVectorService {
   private pool: Pool;
@@ -33,6 +35,10 @@ export class PgVectorService {
       max: 10,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 2000,
+      ssl: {
+        rejectUnauthorized: true,
+        ca: fs.readFileSync(path.resolve(process.env.DB_SSL_CERT!)).toString(),
+      },
     });
 
     // Fixed: Use correct Gemini API
