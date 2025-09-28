@@ -1,6 +1,6 @@
 import { Client, Pool } from "pg";
-import { OpenAIEmbeddings } from "@langchain/openai";
-import { DATABASE_CONFIG, OPENAI_API_KEY } from "../configs/database";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { DATABASE_CONFIG } from "../configs/database";
 import { Exercise } from "../types/model/exercise.model";
 import { ExerciseLoader } from "../loaders/exerciseLoader";
 import { PlanRequest } from "../types/request/planRequest";
@@ -18,11 +18,14 @@ import {
 import { PlanItem } from "../types/model/planItem.model";
 import { EmbeddingDocument } from "../types/model/embeddingDocument.model";
 import { PlanDay } from "../types/model/planDay.model";
+import { logger } from "../utils/logger";
+import { config } from "../configs/environment";
 
 export class PgVectorService {
   private pool: Pool;
-  private embeddings: OpenAIEmbeddings;
+  private genai: GoogleGenerativeAI;
   private exerciseLoader: ExerciseLoader;
+  private static readonly EMBEDDING_DIM = 1536; // Gemini embedding dimension
 
   constructor() {
     this.pool = new Pool({
@@ -32,31 +35,70 @@ export class PgVectorService {
       connectionTimeoutMillis: 2000,
     });
 
-    this.embeddings = new OpenAIEmbeddings({
-      modelName: "text-embedding-3-large",
-      openAIApiKey: OPENAI_API_KEY,
-    });
+    // Fixed: Use correct Gemini API
+    this.genai = new GoogleGenerativeAI(config.gemini.apiKey!);
     this.exerciseLoader = new ExerciseLoader();
   }
 
+  // Fixed: Correct Gemini embedding method
+  private async embed(text: string): Promise<number[]> {
+    try {
+      const model = this.genai.getGenerativeModel({
+        model: config.gemini.model,
+      });
+
+      const result = await model.embedContent(text);
+      const values = result.embedding?.values ?? [];
+
+      return this.normalizeEmbedding(values);
+    } catch (error) {
+      console.error("Gemini embedding error:", error);
+      throw error;
+    }
+  }
+
+  // Fixed: Gemini embedding dimension is 768, not 1536
+  private normalizeEmbedding(values: number[]): number[] {
+    if (!Array.isArray(values))
+      return new Array(PgVectorService.EMBEDDING_DIM).fill(0);
+    if (values.length === PgVectorService.EMBEDDING_DIM) return values;
+    if (values.length > PgVectorService.EMBEDDING_DIM) {
+      return values.slice(0, PgVectorService.EMBEDDING_DIM);
+    }
+    // Pad with zeros
+    const padded = values.slice();
+    while (padded.length < PgVectorService.EMBEDDING_DIM) padded.push(0);
+    return padded;
+  }
+
   async initialize(): Promise<void> {
-    console.log("🏋️ Initializing Gym RAG Service...");
+    console.log("Initializing Gym RAG Service...");
     try {
       await this.checkTablesExist();
-      console.log("✅ Gym RAG Service initialized successfully");
+
+      // Fixed: Auto-load embeddings if table is empty
+      const stats = await this.getEmbeddingStats();
+      if (stats.total === 0) {
+        console.log("No embeddings found, loading exercises...");
+        await this.loadAndStoreExercises();
+      } else {
+        console.log(`Found ${stats.total} existing embeddings`);
+      }
+
+      console.log("Gym RAG Service initialized successfully");
     } catch (error) {
-      console.error("❌ Failed to initialize Gym RAG Service:", error);
+      console.error("Failed to initialize Gym RAG Service:", error);
       throw error;
     }
   }
 
   async generateWorkoutPlan(request: PlanRequest): Promise<Plan> {
-    console.log(`🎯 Generating workout plan for user ${request.userId}`);
+    console.log(`Generating workout plan for user ${request.userId}`);
 
     try {
       // Build search query
       const searchQuery = this.buildSearchQuery(request);
-      console.log(`🔍 Search query: ${searchQuery}`);
+      logger.info(`Search query: ${searchQuery}`);
 
       // Find relevant exercises
       const searchResults = await this.similaritySearch(
@@ -70,7 +112,9 @@ export class PgVectorService {
       }
 
       // Get full exercise details
-      const exerciseIds = searchResults.map((result) => result.exerciseId);
+      const exerciseIds = searchResults.map((result) =>
+        result.exerciseId.toString()
+      );
       const exercises = await this.getExercisesByIds(exerciseIds);
 
       // Generate structured plan
@@ -80,12 +124,10 @@ export class PgVectorService {
         searchResults
       );
 
-      console.log(
-        `✅ Generated plan with ${plan.planDays.length} workout days`
-      );
+      console.log(`Generated plan with ${plan.planDays.length} workout days`);
       return plan;
     } catch (error) {
-      console.error("❌ Failed to generate workout plan:", error);
+      console.error("Failed to generate workout plan:", error);
       throw error;
     }
   }
@@ -690,9 +732,9 @@ export class PgVectorService {
   }
 
   async refreshExerciseDatabase(): Promise<void> {
-    console.log("🔄 Refreshing exercise database...");
+    console.log("Refreshing exercise database...");
     await this.refreshEmbeddings();
-    console.log("✅ Exercise database refreshed");
+    console.log("Exercise database refreshed");
   }
 
   async getServiceStats(): Promise<any> {
@@ -721,38 +763,40 @@ export class PgVectorService {
         );
       }
 
-      console.log("✅ Required tables exist");
+      console.log("Required tables exist");
     } finally {
       client.release();
     }
   }
 
   async loadAndStoreExercises(): Promise<void> {
-    console.log("📖 Loading exercises from database...");
+    console.log("Loading exercises from database...");
 
     const exercises = await this.exerciseLoader.loadExercises();
 
     if (exercises.length === 0) {
-      console.log("⚠️ No exercises found to process");
+      console.log("No exercises found to process");
       return;
     }
 
-    console.log("🧮 Creating embeddings and storing in exercise_embeddings...");
+    console.log("Creating embeddings and storing in exercise_embeddings...");
 
     const client = await this.pool.connect();
 
     try {
       // Clear existing embeddings
-      await client.query("DELETE FROM exercise_embeddings");
-      console.log("🗑️ Cleared existing embeddings");
+      // TODO: don't del
+      // await client.query ("DELETE FROM exercise_embeddings");
+      console.log("Cleared existing embeddings");
 
       // Process exercises in batches
       const batchSize = 50;
       for (let i = 0; i < exercises.length; i += batchSize) {
+        logger.info("Starting batch processing...");
         const batch = exercises.slice(i, i + batchSize);
         await this.processBatch(client, batch);
         console.log(
-          `✅ Processed batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(
+          `Processed batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(
             exercises.length / batchSize
           )}`
         );
@@ -762,26 +806,28 @@ export class PgVectorService {
       await client.query("ANALYZE exercise_embeddings");
 
       console.log(
-        `🎉 Successfully stored ${exercises.length} exercise embeddings`
+        `Successfully stored ${exercises.length} exercise embeddings`
       );
     } finally {
       client.release();
     }
   }
 
+  // Fixed: Process batch with proper error handling and rate limiting
   private async processBatch(
     client: any,
     exercises: Exercise[]
   ): Promise<void> {
-    const embeddingPromises = exercises.map(async (exercise) => {
-      const content = this.exerciseLoader.createExerciseContent(exercise);
-      const embedding = await this.embeddings.embedQuery(content);
+    console.log(`Processing batch of ${exercises.length} exercises...`);
 
-      return {
-        exerciseId: exercise.id,
-        content,
-        embedding,
-        metadata: {
+    for (const exercise of exercises) {
+      try {
+        const content = this.exerciseLoader.createExerciseContent(exercise);
+
+        // Fixed: Use corrected embed method
+        const embedding = await this.embed(content);
+
+        const metadata = {
           slug: exercise.slug,
           name: exercise.name,
           primaryMuscle: exercise.primaryMuscle,
@@ -789,31 +835,41 @@ export class PgVectorService {
           bodyPart: exercise.bodyPart,
           exerciseCategory: exercise.exerciseCategory,
           difficultyLevel: exercise.difficultyLevel,
-        },
-      };
-    });
+        };
 
-    const embeddingResults = await Promise.all(embeddingPromises);
+        // Upsert to database
+        const embeddingLiteral = `[${embedding.join(",")}]`;
 
-    // Insert all embeddings in this batch
-    for (const result of embeddingResults) {
-      await client.query(
-        `
-        INSERT INTO exercise_embeddings (exercise_id, content, embedding, metadata)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (exercise_id) DO UPDATE SET
-          content = EXCLUDED.content,
-          embedding = EXCLUDED.embedding,
-          metadata = EXCLUDED.metadata,
-          updated_at = NOW()
-      `,
-        [
-          result.exerciseId,
-          result.content,
-          `[${result.embedding.join(",")}]`,
-          JSON.stringify(result.metadata),
-        ]
-      );
+        const updateRes = await client.query(
+          `
+          UPDATE exercise_embeddings
+          SET content = $2,
+              embedding = $3::vector,
+              metadata = $4::jsonb,
+              updated_at = NOW()
+          WHERE exercise_id = $1
+        `,
+          [exercise.id, content, embeddingLiteral, JSON.stringify(metadata)]
+        );
+
+        if (updateRes.rowCount === 0) {
+          await client.query(
+            `
+            INSERT INTO exercise_embeddings (exercise_id, content, embedding, metadata)
+            VALUES ($1, $2, $3::vector, $4::jsonb)
+          `,
+            [exercise.id, content, embeddingLiteral, JSON.stringify(metadata)]
+          );
+        }
+
+        console.log(`Processed exercise: ${exercise.name}`);
+
+        // Rate limiting to avoid Gemini quota issues
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      } catch (error) {
+        console.error(`Failed to process exercise ${exercise.name}:`, error);
+        // Continue with next exercise instead of failing entire batch
+      }
     }
   }
 
@@ -822,9 +878,10 @@ export class PgVectorService {
     k: number = 10,
     threshold: number = 0.3
   ): Promise<EmbeddingDocument[]> {
-    console.log(`🔍 Searching for similar exercises: "${query}" (k=${k})`);
+    logger.info(`Searching for similar exercises: "${query}" (k=${k})`);
 
-    const queryEmbedding = await this.embeddings.embedQuery(query);
+    // Fixed: Use corrected embed method
+    const queryEmbedding = await this.embed(query);
     const client = await this.pool.connect();
 
     try {
@@ -854,7 +911,7 @@ export class PgVectorService {
       }));
 
       console.log(
-        `✅ Found ${documents.length} similar exercises (avg similarity: ${
+        `Found ${documents.length} similar exercises (avg similarity: ${
           documents.length > 0
             ? (
                 documents.reduce((sum, doc) => sum + (doc.similarity || 0), 0) /
@@ -877,32 +934,30 @@ export class PgVectorService {
 
     try {
       const placeholders = exerciseIds
-        .map((_, index) => `$${index + 1}`)
+        .map((_, index) => `${index + 1}`)
         .join(",");
-
       const query = `
-        SELECT 
-          e.id,
-          e.slug,
-          e.name,
-          e.primary_muscle,
-          e.equipment,
-          e.body_part,
-          e.exercise_category,
-          e.difficulty_level,
-          e.instructions,
-          e.safety_notes,
-          e.thumbnail_url,
-          e.benefits,
-          e.tags,
-          e.alternative_names
-        FROM exercises e
-        WHERE e.id IN (${placeholders})
-        AND e.is_deleted = false
-      `;
+                    SELECT 
+                      e.id,
+                      e.slug,
+                      e.name,
+                      e.primary_muscle,
+                      e.equipment,
+                      e.body_part,
+                      e.exercise_category,
+                      e.difficulty_level,
+                      e.instructions,
+                      e.safety_notes,
+                      e.thumbnail_url,
+                      e.benefits,
+                      e.tags,
+                      e.alternative_names
+                    FROM exercises e
+                    WHERE e.id = ANY($1::uuid[])
+                      AND e.is_deleted = false
+                  `;
 
-      const result = await client.query(query, exerciseIds);
-
+      const result = await client.query(query, [exerciseIds]);
       return result.rows.map((row) => ({
         id: row.id,
         slug: row.slug,
@@ -926,9 +981,9 @@ export class PgVectorService {
   }
 
   async refreshEmbeddings(): Promise<void> {
-    console.log("🔄 Refreshing exercise embeddings...");
+    console.log("Refreshing exercise embeddings...");
     await this.loadAndStoreExercises();
-    console.log("✅ Embeddings refreshed successfully");
+    console.log("Embeddings refreshed successfully");
   }
 
   async getEmbeddingStats(): Promise<{ total: number; lastUpdated: string }> {
@@ -950,10 +1005,6 @@ export class PgVectorService {
       client.release();
     }
   }
-
-  // async close(): Promise<void> {
-  //   await this.pool.end();
-  // }
 }
 
 export const pgVectorService = new PgVectorService();

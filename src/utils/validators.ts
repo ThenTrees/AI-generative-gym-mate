@@ -4,7 +4,6 @@ import { UserProfile } from "../types/model/userProfile.model";
 import { FitnessLevel, Gender, Objective } from "../common/common-enum";
 
 export const userProfileSchema = Joi.object<UserProfile>({
-  userId: Joi.number().integer().positive().required(),
   age: Joi.number().integer().min(13).max(100).required(),
   gender: Joi.string().valid(Gender.MALE, Gender.FEMALE).required(),
   height: Joi.number().min(100).max(250).required(),
@@ -16,24 +15,20 @@ export const userProfileSchema = Joi.object<UserProfile>({
       FitnessLevel.ADVANCED
     )
     .required(),
-  availableEquipment: Joi.array().items(Joi.string()).required(),
-  injuries: Joi.array().items(Joi.string()).optional(),
+  // availableEquipment: Joi.array().items(Joi.string()).required(),
+  // injuries: Joi.array().items(Joi.string()).optional(),
 });
 
-export const goalSchema = Joi.object<Goal>({
-  id: Joi.number().integer().positive().required(),
-  userProfile: userProfileSchema.required(),
-  objective: Joi.string()
-    .valid(
-      Objective.LOSE_FAT,
-      Objective.GAIN_MUSCLE,
-      Objective.ENDURANCE,
-      Objective.MAINTAIN
-    )
-    .required(),
-  sessionsPerWeek: Joi.number().integer().min(1).max(7).required(),
-  sessionMinutes: Joi.number().integer().min(10).max(120).required(),
-});
+// export const goalSchema = Joi.object<Goal>({
+//   objective: Joi.valid(
+//     Objective.LOSE_FAT,
+//     Objective.GAIN_MUSCLE,
+//     Objective.ENDURANCE,
+//     Objective.MAINTAIN
+//   ).required(),
+//   sessionsPerWeek: Joi.number().integer().min(1).max(7).required(),
+//   sessionMinutes: Joi.number().integer().min(10).max(120).required(),
+// });
 
 // export const workoutPlanRequestSchema = Joi.object<WorkoutPlanRequest>({
 //   userProfile: userProfileSchema.required(),

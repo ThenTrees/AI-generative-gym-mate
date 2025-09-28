@@ -10,7 +10,7 @@ export const DATABASE_CONFIG = {
   password: config.database.password,
 };
 
-export const OPENAI_API_KEY = config.openai.apiKey;
+export const OPENAI_API_KEY = config.gemini.apiKey;
 
 // SQL setup script
 export const PGVECTOR_SETUP_SQL = `

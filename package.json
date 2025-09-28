@@ -10,6 +10,8 @@
     "generate-embeddings": "ts-node src/scripts/generateEmbeddings.ts"
   },
   "dependencies": {
+    "@google/genai": "^1.21.0",
+    "@google/generative-ai": "^0.24.1",
     "@langchain/community": "^0.3.56",
     "@langchain/openai": "^0.6.13",
     "axios": "^1.12.2",

@@ -117,8 +117,10 @@ export class ExerciseLoader {
 
     // Body part variations
     tags.push(exercise.bodyPart.toLowerCase());
-    tags.push(exercise.primaryMuscle.toString().toLowerCase());
-    tags.push(exercise.secondaryMuscles.toString().toLowerCase());
+
+    //TODO:
+    // tags.push(exercise.primaryMuscle.toString().toLowerCase());
+    // tags.push(exercise.secondaryMuscles.toString().toLowerCase());
 
     // Equipment-based tags
     if (exercise.equipment === "body_weight") {

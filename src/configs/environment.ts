@@ -24,13 +24,13 @@ export const config = {
   },
 
   // AI Services
-  openai: {
+  gemini: {
     apiKey: process.env.OPENAI_API_KEY!,
-    model: process.env.OPENAI_MODEL || "gpt-4",
+    model: process.env.OPENAI_MODEL || "text-embedding-004",
     temperature: parseFloat(process.env.OPENAI_TEMPERATURE || "0.7"),
     maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || "2500"),
     embeddingModel:
-      process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-ada-002",
+      process.env.OPENAI_EMBEDDING_MODEL || "gemini-embedding-001",
   },
 
   // Logging
@@ -58,6 +58,6 @@ export const config = {
   },
 };
 // Validation
-if (!config.openai.apiKey) {
+if (!config.gemini.apiKey) {
   throw new Error("OPENAI_API_KEY is required");
 }

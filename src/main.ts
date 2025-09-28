@@ -11,7 +11,9 @@ class RAGApplication {
 
       // Optional: refresh embeddings on startup
       try {
-        await pgVectorService.refreshEmbeddings();
+        if (process.env.RUN_BATCH === "true") {
+          await pgVectorService.refreshEmbeddings();
+        }
       } catch (e) {
         logger.warn("Startup embedding refresh failed, continuing to serve.");
       }
