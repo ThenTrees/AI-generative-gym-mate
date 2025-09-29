@@ -1,5 +1,7 @@
+import fs from "fs";
 import dotenv from "dotenv";
 import { config } from "./environment";
+import path from "path";
 dotenv.config();
 
 export const DATABASE_CONFIG = {
@@ -8,6 +10,16 @@ export const DATABASE_CONFIG = {
   database: config.database.name,
   user: config.database.user,
   password: config.database.password,
+  ssl: {
+    rejectUnauthorized: true,
+    ca: fs
+      .readFileSync(
+        path.resolve(
+          process.env.DB_SSL_CERT || "./certs/ap-southeast-1-bundle.pem"
+        )
+      )
+      .toString(),
+  },
 };
 
 export const OPENAI_API_KEY = config.gemini.apiKey;

@@ -35,12 +35,21 @@ export class PgVectorService {
       max: 10,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 2000,
-      ssl: {
-        rejectUnauthorized: true,
-        ca: fs.readFileSync(path.resolve(process.env.DB_SSL_CERT!)).toString(),
-      },
+      ssl:
+        // process.env.NODE_ENV === "development"
+        //   ? { rejectUnauthorized: false } // dev/test local
+        //   : {
+        {
+          rejectUnauthorized: true,
+          ca: fs
+            .readFileSync(
+              path.resolve(
+                process.env.DB_SSL_CERT || "./certs/ap-southeast-1-bundle.pem"
+              )
+            )
+            .toString(),
+        },
     });
-
     // Fixed: Use correct Gemini API
     this.genai = new GoogleGenerativeAI(config.gemini.apiKey!);
     this.exerciseLoader = new ExerciseLoader();
@@ -792,8 +801,8 @@ export class PgVectorService {
     try {
       // Clear existing embeddings
       // TODO: don't del
-      // await client.query ("DELETE FROM exercise_embeddings");
-      console.log("Cleared existing embeddings");
+      // await client.query("DELETE FROM exercise_embeddings");
+      // console.log("Cleared existing embeddings");
 
       // Process exercises in batches
       const batchSize = 50;
