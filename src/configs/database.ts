@@ -22,7 +22,7 @@ export const DATABASE_CONFIG = {
   },
 };
 
-export const OPENAI_API_KEY = config.gemini.apiKey;
+export const GEMINI_API_KEY = config.gemini.apiKey;
 
 // SQL setup script
 export const PGVECTOR_SETUP_SQL = `
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS exercise_embeddings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     exercise_id UUID NOT NULL,
     content TEXT NOT NULL,
-    embedding VECTOR(1536), -- OpenAI text-embedding-3-large dimension
+    embedding VECTOR(1536), 
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()

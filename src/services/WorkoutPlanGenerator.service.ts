@@ -116,7 +116,7 @@ class WorkoutPlanGeneratorService {
       experienceLevel: userProfile.fitnessLevel,
       // based on goal -> strategy suitable for user.
       sessionStructure: this.determineSessionStructure(goal),
-      equipmentPreferences: [], // TODO:
+      equipmentPreferences: [], // TODO: update late
       // read field healthNote, if seen knee, back, shoulder problems -> warning
       specialConsiderations: this.analyzeHealthConsiderations(userProfile),
       // check level fitness for user -> calc intensity suitable
@@ -176,8 +176,9 @@ class WorkoutPlanGeneratorService {
       // if have problem about health (knee)
       if (healthNote.includes("knee")) {
         logger.info("people with knee problems");
+        // những cân nhắc
         considerations.push({
-          type: "joint_limitation",
+          type: "injury_history",
           affectedArea: "knee",
           restrictions: ["high_impact", "deep_squat"],
           modifications: ["partial_range", "low_impact_alternatives"],
@@ -199,10 +200,60 @@ class WorkoutPlanGeneratorService {
       if (healthNote.includes("shoulder")) {
         logger.info("people with shoulder problems");
         considerations.push({
-          type: "joint_limitation",
+          type: "injury_history",
           affectedArea: "shoulder",
           restrictions: ["overhead", "internal_rotation"],
           modifications: ["reduced_range", "stability_focus"],
+        });
+      }
+
+      if (healthNote.includes("hip")) {
+        logger.info("people with hip problems");
+        considerations.push({
+          type: "mobility_issue",
+          affectedArea: "hip",
+          restrictions: ["deep_squat", "high_impact"],
+          modifications: ["shallow_squat", "controlled_range"],
+        });
+      }
+
+      if (healthNote.includes("ankle")) {
+        logger.info("people with ankle problems");
+        considerations.push({
+          type: "injury_history",
+          affectedArea: "ankle",
+          restrictions: ["jumping", "running"],
+          modifications: ["low_impact", "balance_training"],
+        });
+      }
+
+      if (healthNote.includes("wrist")) {
+        logger.info("people with wrist problems");
+        considerations.push({
+          type: "injury_history",
+          affectedArea: "wrist",
+          restrictions: ["push_up", "heavy_pressing"],
+          modifications: ["neutral_grip", "wrist_support"],
+        });
+      }
+
+      if (healthNote.includes("neck")) {
+        logger.info("people with neck problems");
+        considerations.push({
+          type: "mobility_issue",
+          affectedArea: "neck",
+          restrictions: ["heavy_shrugs", "awkward_positions"],
+          modifications: ["neutral_position", "mobility_focus"],
+        });
+      }
+
+      if (healthNote.includes("elbow")) {
+        logger.info("people with elbow problems");
+        considerations.push({
+          type: "injury_history",
+          affectedArea: "elbow",
+          restrictions: ["heavy_pressing", "hyperextension"],
+          modifications: ["controlled_range", "supportive_bracing"],
         });
       }
     }
@@ -336,13 +387,13 @@ class WorkoutPlanGeneratorService {
 
     // Build comprehensive search queries for different movement patterns
     const searchQueries = this.buildMovementPatternQueries(request, strategy);
-    logger.info(`SearchQueries: ${JSON.stringify(searchQueries)}`);
+    logger.info(`SearchQueries: ${JSON.stringify(searchQueries)} \n`);
 
     const allExercises: ExerciseWithScore[] = [];
 
     for (const query of searchQueries) {
       // TODO: log
-      console.log(`query: ${JSON.stringify(query)}`);
+      console.log(`query: ${JSON.stringify(query)} \n`);
 
       const results = await this.pgVectorService.similaritySearch(
         query.searchText,
@@ -354,8 +405,6 @@ class WorkoutPlanGeneratorService {
       const exercises = await this.pgVectorService.getExercisesByIds(
         exerciseIds
       );
-      // TODO: log
-      console.log(`get exercise: ${JSON.stringify(exercises)}`);
 
       // Combine exercises with their similarity scores and movement pattern info
       const exercisesWithScores: ExerciseWithScore[] = exercises.map(
@@ -376,9 +425,6 @@ class WorkoutPlanGeneratorService {
 
     // Remove duplicates and apply filtering
     const uniqueExercises = this.removeDuplicateExercises(allExercises);
-    // TODO: log
-    console.log(`uniqueExercises size: ${uniqueExercises.length}`);
-
     const filteredExercises = this.applyExerciseFilters(
       uniqueExercises,
       strategy
@@ -410,6 +456,13 @@ class WorkoutPlanGeneratorService {
         searchTerms: "deadlift hinge posterior chain hamstring glute",
         priority: 1,
         maxResults: 8,
+      },
+      {
+        pattern: "lunge",
+        searchTerms:
+          "lunge split squat unilateral single leg quad glute balance",
+        priority: 2,
+        maxResults: 6,
       },
       {
         pattern: "push_vertical",
@@ -447,6 +500,18 @@ class WorkoutPlanGeneratorService {
         priority: 2,
         maxResults: 6,
       },
+      {
+        pattern: "rotation",
+        searchTerms: "rotation anti-rotation core oblique twist woodchop",
+        priority: 2,
+        maxResults: 6,
+      },
+      {
+        pattern: "gait",
+        searchTerms: "walk run sprint locomotion movement pattern",
+        priority: 3,
+        maxResults: 4,
+      },
     ];
 
     // Add cardio if weight loss or endurance goal
@@ -471,6 +536,7 @@ class WorkoutPlanGeneratorService {
 
       // Add equipment preferences
       if (
+        // strategy.equipmentPreferences.length === 0 || current is empty, i'll enhance in the future
         strategy.equipmentPreferences.includes("bodyweight") ||
         strategy.equipmentPreferences.includes("body_weight") ||
         strategy.equipmentPreferences.includes("home_workout")
@@ -483,27 +549,68 @@ class WorkoutPlanGeneratorService {
       // Add objective context
       searchText += ` ${goal.objectiveType.toLowerCase().replace("_", " ")}`;
 
-      // Add health considerations
+      let searchTerms = [];
+
       for (const consideration of strategy.specialConsiderations) {
-        if (
-          consideration.affectedArea === "knee" &&
-          pattern.pattern.includes("squat")
-        ) {
-          searchText += " knee safe low impact";
-        }
-        if (
-          consideration.affectedArea === "spine" &&
-          pattern.pattern.includes("hinge")
-        ) {
-          searchText += " back safe neutral spine";
-        }
-        if (
-          consideration.affectedArea === "shoulder" &&
-          pattern.pattern.includes("push")
-        ) {
-          searchText += " shoulder safe moderate range";
+        switch (consideration.affectedArea) {
+          case "knee":
+            // Nếu động tác liên quan squat, thêm từ khóa an toàn cho đầu gối
+            if (pattern.pattern.includes("squat")) {
+              searchTerms.push("knee safe low impact");
+            }
+            break;
+          case "spine":
+            // Nếu động tác liên quan hinge, thêm từ khóa an toàn cho lưng
+            if (pattern.pattern.includes("hinge")) {
+              searchTerms.push("back safe neutral spine");
+            }
+            break;
+          case "shoulder":
+            // Nếu động tác liên quan push, thêm từ khóa an toàn cho vai
+            if (pattern.pattern.includes("push")) {
+              searchTerms.push("shoulder safe moderate range");
+            }
+            break;
+          case "hip":
+            if (
+              pattern.pattern.includes("squat") ||
+              pattern.pattern.includes("hinge")
+            ) {
+              searchTerms.push("hip safe controlled range");
+            }
+            break;
+          case "ankle":
+            if (
+              pattern.pattern.includes("jump") ||
+              pattern.pattern.includes("run")
+            ) {
+              searchTerms.push("ankle safe low impact");
+            }
+            break;
+          case "wrist":
+            if (
+              pattern.pattern.includes("push") ||
+              pattern.pattern.includes("press")
+            ) {
+              searchTerms.push("wrist safe neutral grip");
+            }
+            break;
+          case "neck":
+            searchTerms.push("neck safe neutral position");
+            break;
+          case "elbow":
+            if (
+              pattern.pattern.includes("push") ||
+              pattern.pattern.includes("press")
+            ) {
+              searchTerms.push("elbow safe controlled range");
+            }
+            break;
         }
       }
+
+      // Ghép các từ khóa thành một chuỗi
+      searchText += " " + searchTerms.join(" ");
 
       queries.push({
         movementPattern: pattern.pattern,
@@ -586,8 +693,6 @@ class WorkoutPlanGeneratorService {
     exercise: Exercise,
     consideration: HealthConsideration
   ): boolean {
-    if (consideration.type !== "joint_limitation") return false;
-
     const exerciseName = exercise.name.toLowerCase();
     const instructions = exercise.instructions?.toString()?.toLowerCase() || "";
 
@@ -596,34 +701,98 @@ class WorkoutPlanGeneratorService {
         case "high_impact":
           if (
             exerciseName.includes("jump") ||
-            exerciseName.includes("plyometric")
-          ) {
+            exerciseName.includes("plyometric") ||
+            exerciseName.includes("run") ||
+            instructions.includes("jump") ||
+            instructions.includes("plyometric") ||
+            instructions.includes("run")
+          )
             return true;
-          }
           break;
+
         case "deep_squat":
           if (
             exerciseName.includes("deep squat") ||
-            exerciseName.includes("full squat")
-          ) {
+            exerciseName.includes("full squat") ||
+            instructions.includes("deep squat") ||
+            instructions.includes("full squat")
+          )
             return true;
-          }
           break;
+
         case "overhead":
           if (
             exerciseName.includes("overhead") ||
-            exerciseName.includes("military press")
-          ) {
+            exerciseName.includes("military press") ||
+            instructions.includes("overhead") ||
+            instructions.includes("military press")
+          )
             return true;
-          }
           break;
+
+        case "internal_rotation":
+          if (
+            exerciseName.includes("internal rotation") ||
+            instructions.includes("internal rotation")
+          )
+            return true;
+          break;
+
         case "spinal_flexion":
           if (
             exerciseName.includes("crunch") ||
-            exerciseName.includes("sit-up")
-          ) {
+            exerciseName.includes("sit-up") ||
+            instructions.includes("crunch") ||
+            instructions.includes("sit-up")
+          )
             return true;
-          }
+          break;
+
+        case "push_up":
+          if (
+            exerciseName.includes("push-up") ||
+            instructions.includes("push-up")
+          )
+            return true;
+          break;
+
+        case "heavy_pressing":
+          if (exerciseName.includes("press") || instructions.includes("press"))
+            return true;
+          break;
+
+        case "heavy_shrugs":
+          if (exerciseName.includes("shrug") || instructions.includes("shrug"))
+            return true;
+          break;
+
+        case "awkward_positions":
+          if (
+            exerciseName.includes("awkward") ||
+            instructions.includes("awkward")
+          )
+            return true;
+          break;
+
+        case "jumping":
+          if (exerciseName.includes("jump") || instructions.includes("jump"))
+            return true;
+          break;
+
+        case "running":
+          if (exerciseName.includes("run") || instructions.includes("run"))
+            return true;
+          break;
+
+        case "hyperextension":
+          if (
+            exerciseName.includes("hyperextension") ||
+            instructions.includes("hyperextension")
+          )
+            return true;
+          break;
+
+        default:
           break;
       }
     }
@@ -699,7 +868,7 @@ class WorkoutPlanGeneratorService {
 
     for (let i = 0; i < sessionsPerWeek; i++) {
       splits.push({
-        name: `Full Body ${i + 1}`,
+        name: `Full Body ${i + 1}`, // must generate from AI, diverse title for plan day.
         focus: "full_body",
         movementPatterns: [
           "squat",
@@ -901,10 +1070,10 @@ class WorkoutPlanGeneratorService {
         [
           request.userId,
           request.goalId || null,
-          `${request.goal.objectiveType.replace("_", " ")} Training Plan`,
+          `${request.goal.objectiveType.replace("_", " ")} Training Plan`, // TODO: nên sinh ra tên phù hợp hơn
           `${request.goal.sessionsPerWeek} sessions/week - ${request.goal.sessionMinutes} min/session`,
           "AI",
-          4, // 4-week cycle
+          request.goal.sessionsPerWeek,
           "ACTIVE",
           JSON.stringify({
             totalExercises: exercises.length,
@@ -1273,6 +1442,13 @@ class WorkoutPlanGeneratorService {
     return duration;
   }
 
+/**
+ * calc weight cần tác động
+ * @param exercise 
+ * @param userProfile 
+ * @param goal 
+ * @returns 
+ */
   private calculateWeight(
     exercise: Exercise,
     userProfile: UserProfile,
@@ -1496,12 +1672,15 @@ class WorkoutPlanGeneratorService {
     sessionsPerWeek: number
   ): string {
     const today = new Date();
+
+    // Tính khoảng cách giữa các buổi tập (có thể là số thập phân)
+    const spacing = 7 / sessionsPerWeek;
+
+    // Cộng số ngày dựa trên spacing
     const scheduledDate = new Date(today);
+    scheduledDate.setDate(today.getDate() + Math.round(dayIndex * spacing));
 
-    // Calculate optimal spacing between sessions
-    const daysBetweenSessions = Math.floor(7 / sessionsPerWeek);
-    scheduledDate.setDate(today.getDate() + dayIndex * daysBetweenSessions);
-
+    // Trả về chuỗi YYYY-MM-DD
     return scheduledDate.toISOString().split("T")[0];
   }
 

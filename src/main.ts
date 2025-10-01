@@ -33,40 +33,22 @@ class RAGApplication {
       });
 
       // Cron every 6 hours
-      cron.schedule("0 */6 * * *", async () => {
-        logger.info("Cron: 6-hour refresh starting...");
-        try {
-          await pgVectorService.refreshEmbeddings();
-          logger.info("Cron: 6-hour refresh completed");
-        } catch (err) {
-          logger.error("Cron: 6-hour refresh failed", err);
-        }
-      });
+      if (process.env.RUN_BATCH === "true") {
+        cron.schedule("0 */6 * * *", async () => {
+          logger.info("Cron: 6-hour refresh starting...");
+          try {
+            await pgVectorService.refreshEmbeddings();
+            logger.info("Cron: 6-hour refresh completed");
+          } catch (err) {
+            logger.error("Cron: 6-hour refresh failed", err);
+          }
+        });
+      }
       logger.info("RAG Application ready!");
     } catch (error) {
       logger.error("Failed to initialize application:", error);
       process.exit(1);
     }
-  }
-
-  async askQuestion(question: string) {
-    try {
-      // const result = await this.queryService.query(question);
-      // console.log("\n🎯 Answer:", result.answer);
-      // console.log("\n📚 Sources:");
-      // result.sources.forEach((source, index) => {
-      // console.log(`${index + 1}. [${source.table}] ${source.title}`);
-      // });
-      // return result;
-    } catch (error) {
-      console.error("❌ Failed to answer question:", error);
-      throw error;
-    } finally {
-    }
-  }
-
-  async forceSync(): Promise<void> {
-    // await this.syncService.forceSyncNow();
   }
 }
 
@@ -74,18 +56,6 @@ async function main() {
   const app = new RAGApplication();
 
   await app.initialize();
-
-  // Example queries
-  const questions = [
-    "Hãy gợi ý cho tôi kế hoạch tập luyện để có thể giảm cân cho người mới bắt đầu?",
-    "Cách để tăng cân bằng tập thể dục?",
-    "Nên tập những bài nào để phát triển cơ cách tay sau?",
-  ];
-
-  for (const question of questions) {
-    console.log(`\n${"=".repeat(50)}`);
-    await app.askQuestion(question);
-  }
 }
 if (require.main === module) {
   main().catch(console.error);

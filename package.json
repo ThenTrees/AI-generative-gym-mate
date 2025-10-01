@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon --watch src --ext ts,tsx --exec ts-node app.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start:prod": "node dist/main.js",
     "generate-embeddings": "ts-node src/scripts/generateEmbeddings.ts"
   },
   "dependencies": {
@@ -39,6 +39,7 @@
     "@types/morgan": "^1.9.10",
     "@types/node": "^20.19.17",
     "@types/pg": "^8.15.5",
+    "cross-env": "^10.1.0",
     "install": "^0.13.0",
     "morgan": "^1.10.1",
     "nodemon": "^3.1.10",

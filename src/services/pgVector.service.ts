@@ -21,7 +21,6 @@ import { EmbeddingDocument } from "../types/model/embeddingDocument.model";
 import { PlanDay } from "../types/model/planDay.model";
 import { logger } from "../utils/logger";
 import { config } from "../configs/environment";
-import path from "path";
 
 export class PgVectorService {
   private pool: Pool;
@@ -35,20 +34,6 @@ export class PgVectorService {
       max: 10,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 2000,
-      ssl:
-        // process.env.NODE_ENV === "development"
-        //   ? { rejectUnauthorized: false } // dev/test local
-        //   : {
-        {
-          rejectUnauthorized: true,
-          ca: fs
-            .readFileSync(
-              path.resolve(
-                process.env.DB_SSL_CERT || "./certs/ap-southeast-1-bundle.pem"
-              )
-            )
-            .toString(),
-        },
     });
     // Fixed: Use correct Gemini API
     this.genai = new GoogleGenerativeAI(config.gemini.apiKey!);
@@ -760,6 +745,9 @@ export class PgVectorService {
     await this.pool.end();
   }
 
+  /**
+   * check table exercise_embeddigs is already
+   */
   private async checkTablesExist(): Promise<void> {
     const client = await this.pool.connect();
 
@@ -784,6 +772,10 @@ export class PgVectorService {
     }
   }
 
+  /**
+   *
+   * @returns if hasn't row, in table, load exercise from fb.
+   */
   async loadAndStoreExercises(): Promise<void> {
     console.log("Loading exercises from database...");
 
@@ -801,8 +793,8 @@ export class PgVectorService {
     try {
       // Clear existing embeddings
       // TODO: don't del
-      // await client.query("DELETE FROM exercise_embeddings");
-      // console.log("Cleared existing embeddings");
+      await client.query("DELETE FROM exercise_embeddings");
+      console.log("Cleared existing embeddings");
 
       // Process exercises in batches
       const batchSize = 50;
@@ -914,6 +906,7 @@ export class PgVectorService {
         LIMIT $2
       `,
         [`[${queryEmbedding.join(",")}]`, k, threshold]
+        //chuyển distance thành similarity score (0 → không giống, 1 → giống hoàn toàn). Chỉ lấy các bài tập có similarity > threshold.
       );
 
       const documents: EmbeddingDocument[] = result.rows.map((row) => ({
@@ -925,7 +918,7 @@ export class PgVectorService {
         similarity: parseFloat(row.similarity),
       }));
 
-      console.log(
+      logger.info(
         `Found ${documents.length} similar exercises (avg similarity: ${
           documents.length > 0
             ? (
@@ -987,8 +980,8 @@ export class PgVectorService {
         thumbnailUrl: row.thumbnail_url,
         benefits: row.benefits,
         tags: row.tags || [],
-        alternativeNames: row.alternative_names || [],
-        secondaryMuscles: row.alternative_names || [],
+        alternativeNames: row.alternative_names || [], // TODO:
+        secondaryMuscles: row.alternative_names || [], // TODO:
       }));
     } finally {
       client.release();
@@ -1001,6 +994,9 @@ export class PgVectorService {
     console.log("Embeddings refreshed successfully");
   }
 
+  /**
+   * @returns total row in table embedding exercise
+   */
   async getEmbeddingStats(): Promise<{ total: number; lastUpdated: string }> {
     const client = await this.pool.connect();
 

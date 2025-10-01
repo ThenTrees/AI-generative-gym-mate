@@ -18,17 +18,10 @@ class GymPlanController {
     try {
       // Your business logic here
       const planRequest: PlanRequest = req.body;
-      // Validate request
-      // const validation = validatePlanRequest(planRequest);
-      // if (!validation.isValid) {
-      //   return res.status(400).json({
-      //     success: false,
-      //     error: "Invalid request parameters",
-      //     details: validation.errors,
-      //   });
-      // }
 
-      logger.info(`Generating workout plan for user ${planRequest.userId}`);
+      logger.info(
+        `[Controller] - Generating workout plan for user ${planRequest.userId}`
+      );
       const startTime = Date.now();
       const workoutPlan = await WorkoutPlanGeneratorService.generateWorkoutPlan(
         planRequest
@@ -44,13 +37,6 @@ class GymPlanController {
           workoutPlan.planDays.length /
           60
       );
-      // const avgSimilarityScore = workoutPlan.planDays
-      //   .flatMap((day) => day.planItems)
-      //   .filter((item) => item.similarityScore)
-      //   .reduce(
-      //     (sum, item, _, arr) => sum + item.similarityScore! / arr.length,
-      //     0
-      //   );
 
       new SuccessResponse({
         message: `Successfully generated ${workoutPlan.planDays.length}-day workout plan`,

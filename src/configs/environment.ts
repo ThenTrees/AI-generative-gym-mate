@@ -15,22 +15,14 @@ export const config = {
     password: process.env.MAIN_DB_PASSWORD || "root",
   },
 
-  // Vector Database
-  chroma: {
-    host: process.env.CHROMA_HOST || "localhost",
-    port: parseInt(process.env.CHROMA_PORT || "8000"),
-    workoutCollection: "fitness_workout_knowledge",
-    nutritionCollection: "fitness_nutrition_knowledge",
-  },
-
   // AI Services
   gemini: {
-    apiKey: process.env.OPENAI_API_KEY!,
-    model: process.env.OPENAI_MODEL || "text-embedding-004",
-    temperature: parseFloat(process.env.OPENAI_TEMPERATURE || "0.7"),
-    maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || "2500"),
+    apiKey: process.env.GEMINI_API_KEY!,
+    model: process.env.GEMINI_MODEL || "text-embedding-004",
+    temperature: parseFloat(process.env.GEMINI_TEMPERATURE || "0.7"),
+    maxTokens: parseInt(process.env.GEMINI_MAX_TOKENS || "2500"),
     embeddingModel:
-      process.env.OPENAI_EMBEDDING_MODEL || "gemini-embedding-001",
+      process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-001",
   },
 
   // Logging
@@ -59,5 +51,5 @@ export const config = {
 };
 // Validation
 if (!config.gemini.apiKey) {
-  throw new Error("OPENAI_API_KEY is required");
+  throw new Error("GEMINI_API_KEY is required");
 }
