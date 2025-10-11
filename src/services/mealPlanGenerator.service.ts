@@ -1,22 +1,28 @@
 import { userProfileSchema } from "./../utils/validators";
-import { WorkoutCalculator } from "../utils/calculators";
-import { FoodVectorService } from "./FoodVector.service";
-import { PgVectorService } from "./pgVector.service";
 import { Pool } from "pg";
 import { MealTime } from "../types/model/mealTime";
 import { DATABASE_CONFIG } from "../configs/database";
 import { Objective } from "../common/common-enum";
 import { MealPlan } from "../types/model/mealPlan";
 import { FoodRecommendation } from "../types/model/foodRecommendation";
-import { Food } from "../types/model/food";
 import { NutritionTarget } from "../types/model/nutritionTarget";
 import { convertDateFormat } from "../utils/convert";
+import {
+  NutritionCalculationService,
+  UserProfile,
+  Goal,
+  NutritionTarget as CalculatedNutritionTarget,
+} from "./NutritionCalculation.service";
+import {
+  MealRecommendationService,
+  MealContext,
+} from "./MealRecommendation.service";
 
 export class MealPlanGenerator {
   private pool: Pool;
-  private pgVectorService: PgVectorService;
-  private foodVectorService: FoodVectorService;
-  private workoutCalculator: WorkoutCalculator;
+  private nutritionCalculationService: NutritionCalculationService;
+  private mealRecommendationService: MealRecommendationService;
+
   constructor() {
     this.pool = new Pool({
       ...DATABASE_CONFIG,
@@ -24,9 +30,8 @@ export class MealPlanGenerator {
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 2000,
     });
-    this.pgVectorService = new PgVectorService();
-    this.foodVectorService = new FoodVectorService();
-    this.workoutCalculator = new WorkoutCalculator();
+    this.nutritionCalculationService = new NutritionCalculationService();
+    this.mealRecommendationService = new MealRecommendationService();
   }
   /**
    * Get meal time distribution
@@ -55,88 +60,17 @@ export class MealPlanGenerator {
     isTrainingDay: boolean,
     workoutContext?: "pre-workout" | "post-workout"
   ): Promise<FoodRecommendation[]> {
-    let query;
-    if (isTrainingDay) {
-      query = this.buildMealQuery(
-        mealTime,
-        objective,
-        isTrainingDay,
-        targetCalories,
-        targetProtein,
-        targetCarbs,
-        workoutContext
-      );
-    } else {
-      query = this.buildMealQuery(
-        mealTime,
-        objective,
-        isTrainingDay,
-        targetCalories,
-        targetProtein,
-        targetCarbs
-      );
-    }
-
-    // Generate query embedding
-    const queryEmbedding = await this.pgVectorService.embed(query);
-
-    // Search
-    const candidates = await this.foodVectorService.searchFoodsByVector(
-      queryEmbedding,
-      {
-        mealTime: mealTime.code,
-        maxCalories: targetCalories * 0.6, // * 0,6 de co the an them nhieu mon khac
-      },
-      30
-    );
-
-    // Nutrition bonuses
-    const calcNutritionBonus = (food: Food): number => {
-      let bonus = 0;
-      if (targetProtein > 20 && food.protein > 15) bonus += 15;
-      if (targetCarbs > 40 && food.carbs > 20) bonus += 10;
-      return bonus;
+    const context: MealContext = {
+      mealTime,
+      targetCalories,
+      targetProtein,
+      targetCarbs,
+      objective,
+      isTrainingDay,
+      workoutContext,
     };
 
-    const calcGoalBonus = (food: Food): number => {
-      switch (objective) {
-        case Objective.GAIN_MUSCLE:
-          return food.protein > 20 ? 25 : 10;
-        case Objective.LOSE_FAT:
-          return food.calories < 150 ? 20 : 5;
-        case Objective.ENDURANCE:
-          return food.carbs > 30 ? 20 : 10;
-        default:
-          return 0;
-      }
-    };
-
-    // Score and rank
-    const recommendations: FoodRecommendation[] = candidates.map((food) => {
-      let score = (food.similarity || 0) * 70; // old is 100
-      const totalScore = score + calcGoalBonus(food) + calcNutritionBonus(food);
-      // const servingSuggestion = Math.min(
-      //   300,
-      //   Math.max(50, (targetCalories / food.calories) * 100)
-      // );
-
-      const calcServingSuggestion = (food: Food): number => {
-        const ratio = targetCalories / (food.calories || 100);
-        const grams = Math.min(400, Math.max(50, ratio * 100));
-        return Math.round(grams / 10) * 10;
-      };
-
-      const servingSuggestion = calcServingSuggestion(food);
-
-      return {
-        ...food,
-        score: totalScore,
-        reason: `Phù hợp cho ${mealTime.nameVi}`,
-        servingSuggestion: Math.round(servingSuggestion / 10) * 10,
-      };
-    });
-
-    return recommendations.sort((a, b) => b.score - a.score).slice(0, 5);
+    return this.mealRecommendationService.generateMealRecommendations(context);
   }
 
   /**
@@ -167,69 +101,22 @@ export class MealPlanGenerator {
       // Would calculate based on session data
       workoutCalories = 400; // Placeholder
     }
-    let bmr;
-    let tdee;
-    let targetCalories;
-    let macros;
-    // check already nutrition target, if exist, skip step calc bmr, tdee and macro
-    const nutritionTargetExist = await this.checkTargetNutritionAlready(
+    // Get or calculate nutrition targets
+    const nutritionTarget = await this.getOrCalculateNutritionTarget(
       userId,
-      goal.id
+      profile,
+      goal,
+      isTrainingDay,
+      workoutCalories
     );
 
-    if (nutritionTargetExist !== null) {
-      bmr = nutritionTargetExist.bmr;
-      tdee = nutritionTargetExist.tdee;
-      targetCalories = nutritionTargetExist.calorieskcal;
-      macros = {
-        proteinG: nutritionTargetExist.proteing,
-        carbsG: nutritionTargetExist.carbsg,
-        fatG: nutritionTargetExist.fatg,
-      };
-    } else {
-      bmr = Math.round(
-        this.workoutCalculator.calculateBMR(
-          profile.gender,
-          profile.weightKg,
-          profile.heightCm,
-          profile.age
-        )
-      );
-      tdee = Math.round(
-        this.workoutCalculator.calculateTDEE(bmr, goal.sessionsPerWeek)
-      );
-
-      targetCalories = this.workoutCalculator.calculateTargetCalories(
-        tdee,
-        goal.objective,
-        isTrainingDay,
-        workoutCalories
-      );
-
-      macros = this.workoutCalculator.calculateMacros(
-        targetCalories,
-        goal.objective
-      );
-      this.saveNutritionTarget(
-        userId,
-        goal.id,
-        targetCalories,
-        macros.proteinG,
-        macros.carbsG,
-        macros.fatG,
-        bmr,
-        tdee,
-        goal.objective
-      );
-    }
-
     console.log("\n🎯 Nutrition targets:");
-    console.log(`  BMR: ${bmr} kcal`);
-    console.log(`  TDEE: ${tdee} kcal`);
-    console.log(`  Target: ${targetCalories} kcal`);
-    console.log(`  Protein: ${macros.proteinG}g`);
-    console.log(`  Carbs: ${macros.carbsG}g`);
-    console.log(`  Fat: ${macros.fatG}g`);
+    console.log(`  BMR: ${nutritionTarget.bmr} kcal`);
+    console.log(`  TDEE: ${nutritionTarget.tdee} kcal`);
+    console.log(`  Target: ${nutritionTarget.targetCalories} kcal`);
+    console.log(`  Protein: ${nutritionTarget.macros.proteinG}g`);
+    console.log(`  Carbs: ${nutritionTarget.macros.carbsG}g`);
+    console.log(`  Fat: ${nutritionTarget.macros.fatG}g`);
 
     // Get meal times
     const mealTimes = await this.getMealTimes();
@@ -244,34 +131,39 @@ export class MealPlanGenerator {
     const meals: any = {};
     // check meal plan already exist
     if (mealPlanExist) {
-      return mealPlanExist;
+      return {
+        ...mealPlanExist,
+        targetNutrition: {
+          calories: nutritionTarget.targetCalories,
+          protein: nutritionTarget.macros.proteinG,
+          carbs: nutritionTarget.macros.carbsG,
+          fat: nutritionTarget.macros.fatG,
+        },
+      };
     } else {
       /**
-       * loop for mealtime, build base macro
+       * Generate meal recommendations for each meal time
        */
       for (const mealTime of mealTimes) {
-        const mealCalories = Math.round(
-          targetCalories * (mealTime.defaultCaloriePercentage / 100)
-        );
-        const mealProtein = Math.round(
-          macros.proteinG * (mealTime.defaultCaloriePercentage / 100)
-        );
-        const mealCarbs = Math.round(
-          macros.carbsG * (mealTime.defaultCaloriePercentage / 100)
-        );
+        const mealNutrition =
+          this.nutritionCalculationService.calculateMealNutrition(
+            nutritionTarget,
+            mealTime.defaultCaloriePercentage
+          );
 
         meals[mealTime.code] = await this.generateMealRecommendations(
           mealTime,
-          mealCalories,
-          mealProtein,
-          mealCarbs,
+          mealNutrition.calories,
+          mealNutrition.protein,
+          mealNutrition.carbs,
           goal.objective,
           isTrainingDay
         );
       }
 
       // Calculate totals
-      const totalNutrition = this.calculateTotalNutrition(meals);
+      const totalNutrition =
+        this.nutritionCalculationService.calculateTotalNutrition(meals);
 
       // Save to database
       const mealPlanId = await this.saveMealPlan(
@@ -283,7 +175,7 @@ export class MealPlanGenerator {
           totalCarbs: totalNutrition.carbs,
           totalFat: totalNutrition.fat,
           isTrainingDay,
-          baseCalories: tdee,
+          baseCalories: nutritionTarget.tdee,
           workoutAdjustment: workoutCalories,
         },
         meals,
@@ -297,36 +189,67 @@ export class MealPlanGenerator {
         meals,
         totalNutrition,
         targetNutrition: {
-          calories: targetCalories,
-          protein: macros.proteinG,
-          carbs: macros.carbsG,
-          fat: macros.fatG,
+          calories: nutritionTarget.targetCalories,
+          protein: nutritionTarget.macros.proteinG,
+          carbs: nutritionTarget.macros.carbsG,
+          fat: nutritionTarget.macros.fatG,
         },
       };
     }
   }
 
-  // Generate meals
+  /**
+   * Get existing nutrition target or calculate new one
+   */
+  private async getOrCalculateNutritionTarget(
+    userId: string,
+    profile: UserProfile,
+    goal: Goal,
+    isTrainingDay: boolean,
+    workoutCalories: number
+  ): Promise<CalculatedNutritionTarget> {
+    // Check if nutrition target already exists
+    const existingTarget = await this.checkTargetNutritionAlready(
+      userId,
+      goal.id
+    );
 
-  private calculateTotalNutrition(meals: any): any {
-    let total = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+    if (existingTarget) {
+      return {
+        bmr: existingTarget.bmr,
+        tdee: existingTarget.tdee,
+        targetCalories: existingTarget.calorieskcal,
+        macros: {
+          proteinG: existingTarget.proteing,
+          carbsG: existingTarget.carbsg,
+          fatG: existingTarget.fatg,
+        },
+      };
+    }
 
-    Object.values(meals).forEach((mealFoods: any) => {
-      mealFoods.forEach((food: FoodRecommendation) => {
-        const multiplier = food.servingSuggestion / 100;
-        total.calories += food.calories * multiplier;
-        total.protein += food.protein * multiplier;
-        total.carbs += food.carbs * multiplier;
-        total.fat += food.fat * multiplier;
-      });
-    });
+    // Calculate new nutrition target
+    const nutritionTarget =
+      this.nutritionCalculationService.calculateNutritionTarget(
+        profile,
+        goal,
+        isTrainingDay,
+        workoutCalories
+      );
 
-    return {
-      calories: Math.round(total.calories),
-      protein: Math.round(total.protein),
-      carbs: Math.round(total.carbs),
-      fat: Math.round(total.fat),
-    };
+    // Save to database
+    await this.saveNutritionTarget(
+      userId,
+      goal.id,
+      nutritionTarget.targetCalories,
+      nutritionTarget.macros.proteinG,
+      nutritionTarget.macros.carbsG,
+      nutritionTarget.macros.fatG,
+      nutritionTarget.bmr,
+      nutritionTarget.tdee,
+      goal.objective
+    );
+
+    return nutritionTarget;
   }
 
   private async saveMealPlan(
@@ -448,50 +371,6 @@ export class MealPlanGenerator {
     }
   }
 
-  private buildMealQuery(
-    mealTime: MealTime,
-    objective: Objective,
-    isTrainingDay: boolean,
-    targetCalories: number,
-    targetProtein: number,
-    targetCarbs: number,
-    // Thêm tham số mới để xác định thời điểm liên quan đến buổi tập
-    workoutContext?: "pre-workout" | "post-workout"
-  ): string {
-    // 1. Bắt đầu với vai trò và yêu cầu cơ bản
-    let query = `Bạn là chuyên gia dinh dưỡng Gym. Gợi ý cho tôi một món ăn cho ${mealTime.nameVi}. với ${targetCalories} calories bao gồm ${targetProtein} protein và ${targetCarbs} carbs. `;
-
-    // 2. Thêm mục tiêu chính
-    const objectiveMap = {
-      [Objective.GAIN_MUSCLE]:
-        "Món ăn này cần giúp tăng cơ nạc, giàu protein nhưng hạn chế chất béo không cần thiết. ",
-      [Objective.LOSE_FAT]:
-        "Món ăn này cần hỗ trợ giảm mỡ, ít calo, ít đường và dầu mỡ. ",
-      [Objective.ENDURANCE]:
-        "Món ăn này cần tối ưu cho sức bền, cung cấp nhiều carb phức. ",
-      [Objective.MAINTAIN]: "",
-    };
-    if (objectiveMap[objective]) {
-      query += objectiveMap[objective];
-    }
-
-    // 3. Thêm ngữ cảnh ngày tập (chi tiết hơn)
-    if (isTrainingDay && workoutContext) {
-      if (workoutContext === "pre-workout") {
-        query +=
-          "Đây là bữa ăn quan trọng trước buổi tập, cần cung cấp năng lượng bền bỉ và dễ tiêu hóa. ";
-      } else if (workoutContext === "post-workout") {
-        query +=
-          "Đây là bữa ăn phục hồi sau tập, cần protein hấp thu tốt để sửa chữa cơ bắp. ";
-      }
-    }
-
-    // 4. Thêm các sở thích chung
-    query += "Ưu tiên các phương pháp chế biến lành mạnh như luộc, hấp, nướng.";
-
-    return query;
-  }
-
   private async checkTargetNutritionAlready(
     userId: string,
     goalId: string
@@ -548,7 +427,7 @@ export class MealPlanGenerator {
         f.fiber as foodFiber,
         f.image_url as foodImage,
         f.detailed_benefits as foodBenefits,
-        mt.code as nealtimecode
+        mt.code as mealtimecode
       FROM meal_plans mp
       JOIN meal_plan_items mpi
       ON mp.id = mpi.meal_plan_id
@@ -559,10 +438,12 @@ export class MealPlanGenerator {
       [userId, planDate]
     );
     const resultMealPlan = result.rows;
-
-    const mealPlanId = resultMealPlan[0].mealplanid;
-    const mealPlanDate = resultMealPlan[0].plandate;
-    const isTrainingDay = resultMealPlan[0].istrainingday;
+    if (resultMealPlan.length === 0) {
+      return null;
+    }
+    const mealPlanId = resultMealPlan[0].mealPlanId;
+    const mealPlanDate = resultMealPlan[0].planDate;
+    const isTrainingDay = resultMealPlan[0].isTrainingDay;
 
     const meals: any = {};
 
@@ -580,12 +461,6 @@ export class MealPlanGenerator {
       planDate: mealPlanDate,
       isTrainingDay,
       meals: groupedMeals,
-      // targetNutrition: {
-      //   calories: targetCalories,
-      //   protein: macros.proteinG,
-      //   carbs: macros.carbsG,
-      //   fat: macros.fatG,
-      // },
     };
   }
 
