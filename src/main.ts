@@ -1,6 +1,7 @@
 import { logger } from "./utils/logger";
 import { pgVectorService } from "./services/pgVector.service";
 import * as cron from "node-cron";
+import { foodVectorService } from "./services/FoodVector.service";
 
 class RAGApplication {
   async initialize() {
@@ -8,6 +9,7 @@ class RAGApplication {
     try {
       // Init vector service (tables, clients, embeddings model)
       await pgVectorService.initialize();
+      await foodVectorService.initialize();
 
       // Optional: refresh embeddings on startup
       try {

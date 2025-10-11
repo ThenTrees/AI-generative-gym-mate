@@ -10,16 +10,16 @@ export const DATABASE_CONFIG = {
   database: config.database.name,
   user: config.database.user,
   password: config.database.password,
-  ssl: {
-    rejectUnauthorized: true,
-    ca: fs
-      .readFileSync(
-        path.resolve(
-          process.env.DB_SSL_CERT || "./certs/ap-southeast-1-bundle.pem"
-        )
-      )
-      .toString(),
-  },
+  // ssl: {
+  //   rejectUnauthorized: true,
+  //   ca: fs
+  //     .readFileSync(
+  //       path.resolve(
+  //         process.env.DB_SSL_CERT || "./certs/ap-southeast-1-bundle.pem"
+  //       )
+  //     )
+  //     .toString(),
+  // },
 };
 
 export const GEMINI_API_KEY = config.gemini.apiKey;

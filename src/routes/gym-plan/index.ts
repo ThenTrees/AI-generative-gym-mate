@@ -1,4 +1,4 @@
-"use strick";
+"use strict";
 import express from "express";
 import GymPlanController from "../../controllers/gymPlan.controller";
 const router = express.Router();

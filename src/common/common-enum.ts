@@ -27,3 +27,7 @@ export enum Intensity {
   MEDIUM = "MEDIUM",
   HIGH = "HIGH",
 }
+export enum DayType {
+  TRAIN = "TRAIN",
+  REST = "REST",
+}

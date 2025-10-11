@@ -21,8 +21,7 @@ export const config = {
     model: process.env.GEMINI_MODEL || "text-embedding-004",
     temperature: parseFloat(process.env.GEMINI_TEMPERATURE || "0.7"),
     maxTokens: parseInt(process.env.GEMINI_MAX_TOKENS || "2500"),
-    embeddingModel:
-      process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-001",
+    embeddingModel: process.env.GEMINI_EMBEDDING_MODEL || "text-embedding-004",
   },
 
   // Logging

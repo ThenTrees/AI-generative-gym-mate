@@ -25,20 +25,30 @@ import { HealthConsideration } from "../types/model/HealthConsideration";
 import { VolumeTargets } from "../types/model/VolumeTargets";
 import { RestPeriods } from "../types/model/RestPeriods";
 import { SearchQuery } from "../types/model/SearchQuery";
+import { WorkoutCalculator } from "../utils/calculators";
+import { WORKOUT_CONSTANTS } from "../utils/constants";
+import { ta } from "date-fns/esm/locale";
 
 class WorkoutPlanGeneratorService {
   private pool: Pool;
   private pgVectorService: PgVectorService;
+  private workoutCalculator: WorkoutCalculator;
   constructor() {
     this.pool = new Pool(DATABASE_CONFIG);
     this.pgVectorService = new PgVectorService();
+    this.workoutCalculator = new WorkoutCalculator();
   }
   async initialize(): Promise<void> {
     logger.info("Initializing Workout Plan Generator Service...");
     await this.pgVectorService.initialize();
     console.log("Workout Plan Generator Service ready");
   }
-
+  /**
+   * Generates a personalized workout plan based on user profile and goals
+   * @param request - User profile and goal information
+   * @returns Promise<Plan> - Generated workout plan with exercises and prescriptions
+   * @throws AppError - If user profile is invalid or goal cannot be achieved
+   */
   async generateWorkoutPlan(request: PlanRequest): Promise<Plan> {
     logger.info(
       `[WorkoutPlanService] - Generating workout plan for user ${request.userId}`
@@ -274,12 +284,13 @@ class WorkoutPlanGeneratorService {
     userProfile: UserProfile,
     goal: Goal
   ): IntensityLevel {
-    let baseIntensity = 5; // Medium
+    let baseIntensity = WORKOUT_CONSTANTS.BASE_INTENSITY; // Medium
 
     // Level adjustments, intensity = cường độ
-    if (userProfile.fitnessLevel === FitnessLevel.BEGINNER) baseIntensity = 3;
+    if (userProfile.fitnessLevel === FitnessLevel.BEGINNER)
+      baseIntensity = WORKOUT_CONSTANTS.BASE_INTENSITY - 2;
     else if (userProfile.fitnessLevel === FitnessLevel.ADVANCED)
-      baseIntensity = 7;
+      baseIntensity = WORKOUT_CONSTANTS.BASE_INTENSITY + 2;
 
     // Goal adjustments
     if (goal.objectiveType === Objective.LOSE_FAT) baseIntensity += 1;
@@ -303,9 +314,9 @@ class WorkoutPlanGeneratorService {
    */
   private calculateRestPeriods(objective: string, level: string): RestPeriods {
     let baseTimes: RestPeriods = {
-      compound: 120,
+      compound: WORKOUT_CONSTANTS.MAX_SESSION_MINUTES,
       isolation: 60,
-      cardio: 30,
+      cardio: WORKOUT_CONSTANTS.MIN_SESSION_MINUTES,
     };
 
     const addDelta = (rp: RestPeriods, d: number): RestPeriods => ({
@@ -319,16 +330,24 @@ class WorkoutPlanGeneratorService {
 
     // Objective adjustments
     if (objective === Objective.LOSE_FAT) {
-      baseTimes = { compound: 90, isolation: 45, cardio: 20 };
+      baseTimes = {
+        compound: WORKOUT_CONSTANTS.MAX_SESSION_MINUTES * 0.75,
+        isolation: WORKOUT_CONSTANTS.MIN_SESSION_MINUTES * 0.75,
+        cardio: WORKOUT_CONSTANTS.MIN_SESSION_MINUTES * 0.5,
+      };
     } else if (objective === Objective.GAIN_MUSCLE) {
-      baseTimes = { compound: 150, isolation: 90, cardio: baseTimes.cardio };
+      baseTimes = {
+        compound: WORKOUT_CONSTANTS.MAX_SESSION_MINUTES * 1.5,
+        isolation: WORKOUT_CONSTANTS.MIN_SESSION_MINUTES * 1.5,
+        cardio: baseTimes.cardio,
+      };
     }
 
     // Level adjustments
     if (level === FitnessLevel.BEGINNER) {
-      baseTimes = addDelta(baseTimes, 30);
+      baseTimes = addDelta(baseTimes, WORKOUT_CONSTANTS.MIN_SESSION_MINUTES);
     } else if (level === FitnessLevel.ADVANCED) {
-      baseTimes = subDelta(baseTimes, 15);
+      baseTimes = subDelta(baseTimes, WORKOUT_CONSTANTS.MIN_SESSION_MINUTES);
     }
     return baseTimes;
   }
@@ -338,7 +357,7 @@ class WorkoutPlanGeneratorService {
     userProfile: UserProfile
   ): VolumeTargets {
     const baseVolume: VolumeTargets = {
-      setsPerMuscleGroup: 12,
+      setsPerMuscleGroup: WORKOUT_CONSTANTS.BASE_SETS,
       repsRange: [8, 12] as const,
       weeklyVolume: goal.sessionsPerWeek * goal.sessionMinutes,
     };
@@ -346,15 +365,15 @@ class WorkoutPlanGeneratorService {
     // Objective adjustments
     switch (goal.objectiveType) {
       case Objective.GAIN_MUSCLE:
-        baseVolume.setsPerMuscleGroup = 16;
+        baseVolume.setsPerMuscleGroup = WORKOUT_CONSTANTS.BASE_SETS + 4;
         baseVolume.repsRange = [8, 12] as const;
         break;
       case Objective.LOSE_FAT:
-        baseVolume.setsPerMuscleGroup = 10;
+        baseVolume.setsPerMuscleGroup = WORKOUT_CONSTANTS.BASE_SETS - 2;
         baseVolume.repsRange = [12, 15] as const;
         break;
       case Objective.ENDURANCE:
-        baseVolume.setsPerMuscleGroup = 8;
+        baseVolume.setsPerMuscleGroup = WORKOUT_CONSTANTS.BASE_SETS - 4;
         baseVolume.repsRange = [15, 25] as const;
         break;
       case Objective.MAINTAIN:
@@ -387,14 +406,10 @@ class WorkoutPlanGeneratorService {
 
     // Build comprehensive search queries for different movement patterns
     const searchQueries = this.buildMovementPatternQueries(request, strategy);
-    logger.info(`SearchQueries: ${JSON.stringify(searchQueries)} \n`);
 
     const allExercises: ExerciseWithScore[] = [];
 
     for (const query of searchQueries) {
-      // TODO: log
-      console.log(`query: ${JSON.stringify(query)} \n`);
-
       const results = await this.pgVectorService.similaritySearch(
         query.searchText,
         query.maxResults,
@@ -1074,7 +1089,7 @@ class WorkoutPlanGeneratorService {
           `${request.goal.sessionsPerWeek} sessions/week - ${request.goal.sessionMinutes} min/session`,
           "AI",
           request.goal.sessionsPerWeek,
-          "ACTIVE",
+          "DRAFT",
           JSON.stringify({
             totalExercises: exercises.length,
             avgSimilarityScore:
@@ -1300,12 +1315,12 @@ class WorkoutPlanGeneratorService {
     goal: Goal,
     split: WorkoutSplit
   ): Prescription {
-    const baseReps = this.calculateReps(
+    const baseReps = this.workoutCalculator.calculateReps(
       goal.objectiveType,
       userProfile.fitnessLevel,
       exercise
     );
-    const baseSets = this.calculateSets(
+    const baseSets = this.workoutCalculator.calculateSets(
       goal.objectiveType,
       userProfile.fitnessLevel,
       exercise
@@ -1337,92 +1352,6 @@ class WorkoutPlanGeneratorService {
     };
   }
 
-  private calculateReps(
-    objective: string,
-    level: string,
-    exercise: Exercise
-  ): number {
-    let baseReps: number;
-
-    // Base reps by objective
-    switch (objective) {
-      case Objective.GAIN_MUSCLE:
-        baseReps = 10;
-        break;
-      case Objective.LOSE_FAT:
-        baseReps = 12;
-        break;
-      case Objective.ENDURANCE:
-        baseReps = 20;
-        break;
-      default:
-        baseReps = 12;
-    }
-
-    // Adjust for level
-    if (level === FitnessLevel.BEGINNER) {
-      baseReps += 2;
-    } else if (level === FitnessLevel.ADVANCED) {
-      if (objective === Objective.GAIN_MUSCLE) baseReps -= 2;
-    }
-
-    // Adjust for exercise type
-    if (
-      exercise.exerciseCategory === "strength" &&
-      exercise.name.toLowerCase().includes("deadlift")
-    ) {
-      baseReps = Math.max(5, baseReps - 5); // Heavy compounds lower reps
-    }
-
-    if (exercise.bodyPart === "waist") {
-      baseReps += 5; // Core exercises typically higher reps
-    }
-
-    return Math.max(5, Math.min(30, baseReps));
-  }
-
-  private calculateSets(
-    objective: string,
-    level: string,
-    exercise: Exercise
-  ): number {
-    let baseSets: number;
-
-    // Base sets by level
-    switch (level) {
-      case FitnessLevel.BEGINNER:
-        baseSets = 2;
-        break;
-      case FitnessLevel.INTERMEDIATE:
-        baseSets = 3;
-        break;
-      case FitnessLevel.ADVANCED:
-        baseSets = 4;
-        break;
-      default:
-        baseSets = 3;
-    }
-
-    // Adjust for objective
-    if (objective === Objective.ENDURANCE) {
-      baseSets = Math.max(3, baseSets);
-    } else if (objective === Objective.GAIN_MUSCLE) {
-      baseSets = Math.max(3, baseSets);
-    }
-
-    // Adjust for exercise complexity
-    if (
-      exercise.name.toLowerCase().includes("compound") ||
-      ["squat", "deadlift", "bench", "row"].some((move) =>
-        exercise.name.toLowerCase().includes(move)
-      )
-    ) {
-      baseSets = Math.max(3, baseSets);
-    }
-
-    return Math.max(1, Math.min(6, baseSets));
-  }
-
   private calculateDuration(exercise: Exercise, level: FitnessLevel): number {
     const baseDurations = {
       BEGINNER: 30,
@@ -1442,13 +1371,13 @@ class WorkoutPlanGeneratorService {
     return duration;
   }
 
-/**
- * calc weight cần tác động
- * @param exercise 
- * @param userProfile 
- * @param goal 
- * @returns 
- */
+  /**
+   * calc weight cần tác động
+   * @param exercise
+   * @param userProfile
+   * @param goal
+   * @returns
+   */
   private calculateWeight(
     exercise: Exercise,
     userProfile: UserProfile,
