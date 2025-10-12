@@ -146,28 +146,4 @@ export class NutritionCalculationService {
       fat: Math.round(targetNutrition.macros.fatG * percentage),
     };
   }
-
-  /**
-   * Calculate total nutrition from meal items
-   */
-  calculateTotalNutrition(meals: Record<string, any[]>): MealNutrition {
-    let total = { calories: 0, protein: 0, carbs: 0, fat: 0 };
-
-    Object.values(meals).forEach((mealFoods: any[]) => {
-      mealFoods.forEach((food: any) => {
-        const multiplier = food.servingSuggestion / 100;
-        total.calories += food.calories * multiplier;
-        total.protein += food.protein * multiplier;
-        total.carbs += food.carbs * multiplier;
-        total.fat += food.fat * multiplier;
-      });
-    });
-
-    return {
-      calories: Math.round(total.calories),
-      protein: Math.round(total.protein),
-      carbs: Math.round(total.carbs),
-      fat: Math.round(total.fat),
-    };
-  }
 }

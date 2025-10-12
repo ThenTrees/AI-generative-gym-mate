@@ -161,19 +161,15 @@ export class MealPlanGenerator {
         );
       }
 
-      // Calculate totals
-      const totalNutrition =
-        this.nutritionCalculationService.calculateTotalNutrition(meals);
-
       // Save to database
       const mealPlanId = await this.saveMealPlan(
         {
           userId,
           planDate,
-          totalCalories: totalNutrition.calories,
-          totalProtein: totalNutrition.protein,
-          totalCarbs: totalNutrition.carbs,
-          totalFat: totalNutrition.fat,
+          totalCalories: 0,
+          totalProtein: 0,
+          totalCarbs: 0,
+          totalFat: 0,
           isTrainingDay,
           baseCalories: nutritionTarget.tdee,
           workoutAdjustment: workoutCalories,
@@ -187,7 +183,12 @@ export class MealPlanGenerator {
         planDate: planDate,
         isTrainingDay,
         meals,
-        totalNutrition,
+        actualNutrition: {
+          calories: 0,
+          protein: 0,
+          carbs: 0,
+          fat: 0,
+        },
         targetNutrition: {
           calories: nutritionTarget.targetCalories,
           protein: nutritionTarget.macros.proteinG,
@@ -195,6 +196,37 @@ export class MealPlanGenerator {
           fat: nutritionTarget.macros.fatG,
         },
       };
+    }
+  }
+
+  async updateMealPlanItemStatus(
+    mealPlanItemId: string,
+    mealPlanId: string,
+    mealTimeId: string,
+    foodId: string
+  ) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Insert meal plan
+      const updateMealPlanItemStatus = `
+        Update INTO meal_plan_items 
+        SET is_completed = true, completed_at = NOW()
+        WHERE id = $1 AND meal_plan_id = $2 AND meal_time_id = $3 AND food_id = $4
+      `;
+
+      const updateMealPlanItemStatusResult = await client.query(
+        updateMealPlanItemStatus,
+        [mealPlanItemId, mealPlanId, mealTimeId, foodId]
+      );
+      await client.query("COMMIT");
+
+      return updateMealPlanItemStatusResult;
+    } catch (error) {
+      await client.query("ROLLBACK");
+    } finally {
+      client.release();
     }
   }
 
@@ -396,10 +428,6 @@ export class MealPlanGenerator {
     return result.rows[0];
   }
 
-  /**
-   * must: -> check mp exist -> lay id food, gen food.
-   */
-
   private async getMealPlanByUserIdAndPlanDate(
     userId: string,
     planDate: string
@@ -417,7 +445,10 @@ export class MealPlanGenerator {
         mp.is_training_day isTrainingDay,
         mp.base_calories as baseCalories,
         mpi.display_order as displayOrder,
+        mpi.id as mealPlanItemId,
+        mpi.meal_time_id as mealTimeId,
         mpi.servings,
+        mpi.is_completed as completed,
         f.food_name as foodName,
         f.food_name_vi as foodNameVi,
         f.calories as foodCalories,
@@ -444,11 +475,17 @@ export class MealPlanGenerator {
     const mealPlanId = resultMealPlan[0].mealPlanId;
     const mealPlanDate = resultMealPlan[0].planDate;
     const isTrainingDay = resultMealPlan[0].isTrainingDay;
+    const actualNutrition = {
+      calories: resultMealPlan[0].totalcalories,
+      protein: resultMealPlan[0].totalprotein,
+      carbs: resultMealPlan[0].totalcarbs,
+      fat: resultMealPlan[0].totalfat,
+    };
 
     const meals: any = {};
 
     const groupedMeals = resultMealPlan.reduce((acc, meal) => {
-      const key = meal.nealtimecode;
+      const key = meal.mealtimecode;
       if (!acc[key]) {
         acc[key] = [];
       }
@@ -461,6 +498,7 @@ export class MealPlanGenerator {
       planDate: mealPlanDate,
       isTrainingDay,
       meals: groupedMeals,
+      actualNutrition,
     };
   }
 

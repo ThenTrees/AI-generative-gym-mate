@@ -32,6 +32,13 @@ class MealPlanController {
     }
   };
 
+  mealPlanItemCompleted = async (req: Request, res: Response) => {
+    try {
+      const { mealPlanItemId, MealPlanId, mealTimeId, foodId, completed } =
+        req.body;
+    } catch (error) {}
+  };
+
   searchFoodByNaturalLanguage = async (req: Request, res: Response) => {};
 }
 

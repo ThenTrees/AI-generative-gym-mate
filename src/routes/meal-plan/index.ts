@@ -6,5 +6,6 @@ const router = express.Router();
 
 // router.post("/search", mealPlanController.generateMealPlanForUser);
 router.post("/meal-plan/generate", mealPlanController.generateMealPlanForUser);
+router.get("/meal-plan-item/completed");
 
 export default router;
