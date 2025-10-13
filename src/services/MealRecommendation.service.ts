@@ -43,13 +43,15 @@ export class MealRecommendationService {
     // Generate query embedding
     const queryEmbedding = await this.pgVectorService.embed(query);
 
+    const maxCalories =
+      context.targetCalories * NUTRITION_CONSTANTS.MAX_CALORIE_RATIO;
+
     // Search for food candidates
     const candidates = await this.foodVectorService.searchFoodsByVector(
       queryEmbedding,
       {
         mealTime: context.mealTime.code,
-        maxCalories:
-          context.targetCalories * NUTRITION_CONSTANTS.MAX_CALORIE_RATIO,
+        maxCalories: maxCalories,
       },
       NUTRITION_CONSTANTS.DEFAULT_SEARCH_LIMIT
     );
@@ -67,6 +69,7 @@ export class MealRecommendationService {
         score,
         reason: `Phù hợp cho ${context.mealTime.nameVi}`,
         servingSuggestion,
+        targetCalories: maxCalories,
       };
     });
 

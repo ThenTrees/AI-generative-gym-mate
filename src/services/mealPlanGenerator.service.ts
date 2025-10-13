@@ -509,16 +509,16 @@ export class MealPlanGenerator {
     const result = await this.pool.query(
       `
       SELECT
-      nt.id,
-    nt.user_id as userId,
-    nt.goal_id as goalId,
-    nt.calories_kcal as caloriesKcal,
-    nt.protein_g as proteinG,
-    nt.fat_g as fatG,
-    nt.carbs_g as carbsG,
-    nt.bmr,
-    nt.tdee,
-    nt.goal_type
+        nt.id,
+        nt.user_id as "userId",
+        nt.goal_id as "goalId",
+        nt.calories_kcal as "caloriesKcal",
+        nt.protein_g as "proteinG",
+        nt.fat_g as "fatG",
+        nt.carbs_g as "carbsG",
+        nt.bmr,
+        nt.tdee,
+        nt.goal_type
     FROM nutrition_targets nt
     WHERE user_id = $1 AND goal_id = $2 AND is_active = true
     `,
