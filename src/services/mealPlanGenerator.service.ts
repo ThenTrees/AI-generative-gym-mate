@@ -16,6 +16,8 @@ import {
   MealContext,
 } from "./MealRecommendation.service";
 import { logger } from "../utils/logger";
+import { foodVectorService } from "./FoodVector.service";
+import { Food } from "../types/model/food";
 
 export class MealPlanGenerator {
   private pool: Pool;
@@ -109,18 +111,18 @@ export class MealPlanGenerator {
       workoutCalories
     );
 
-    console.log("\n🎯 Nutrition targets:");
-    console.log(`  BMR: ${nutritionTarget.bmr} kcal`);
-    console.log(`  TDEE: ${nutritionTarget.tdee} kcal`);
-    console.log(`  Target: ${nutritionTarget.targetCalories} kcal`);
-    console.log(`  Protein: ${nutritionTarget.macros.proteinG}g`);
-    console.log(`  Carbs: ${nutritionTarget.macros.carbsG}g`);
-    console.log(`  Fat: ${nutritionTarget.macros.fatG}g`);
+    logger.info("🎯 Nutrition targets:");
+    logger.info(`BMR: ${nutritionTarget.bmr} kcal`);
+    logger.info(`TDEE: ${nutritionTarget.tdee} kcal`);
+    logger.info(`Target: ${nutritionTarget.targetCalories} kcal`);
+    logger.info(`Protein: ${nutritionTarget.macros.proteinG}g`);
+    logger.info(`Carbs: ${nutritionTarget.macros.carbsG}g`);
+    logger.info(`Fat: ${nutritionTarget.macros.fatG}g`);
 
     // Get meal times
     const mealTimes = await this.getMealTimes();
 
-    console.log("\n🍽️  Generating meal plan...");
+    logger.info("🍽️  Generating meal plan...");
 
     const planDateTransfer = convertDateFormat(planDate.toLocaleDateString());
 
@@ -257,14 +259,74 @@ export class MealPlanGenerator {
   }
 
   // add food into meal plan => insert new record meal plan item
-  async addFoodIntoMEalPlan(
+  async addFoodIntoMealPlan(
     mealPlanId: string,
     mealTimeId: string,
-    foodId: string
+    foodId: string,
+    servings: number
   ) {
-    // check meal plan already exist
-    // get meal time
-    // get info food id || TODO:
+    try {
+      // check exist in meal plan item
+      const mealPlanItemExist = await this.checkMealPlanExist(
+        mealPlanId,
+        mealTimeId,
+        foodId
+      );
+      if (mealPlanItemExist) {
+        throw new Error("food exist in meal plan!");
+      }
+      // check meal plan already exist
+      const mealPlan = await this.getMealPlanById(mealPlanId);
+      if (!mealPlan) {
+        throw new Error("Meal plan not found!");
+      }
+      // get meal time | skip
+      // get info food id || TODO:
+      const foodList: Food[] = await foodVectorService.getFoodsByIds([foodId]);
+      const food = foodList[0];
+      const calories = Math.round(
+        (servings * food.calories) / food.servingWeightGrams
+      );
+      const protein = Math.round(
+        (servings * food.protein) / food.servingWeightGrams
+      );
+      const carbs = Math.round(
+        (servings * food.carbs) / food.servingWeightGrams
+      );
+      const fat = Math.round((servings * food.fat) / food.servingWeightGrams);
+      await this.saveMealPlanItem(
+        mealPlanId,
+        mealTimeId,
+        foodId,
+        food.foodNameVi,
+        servings,
+        calories,
+        protein,
+        carbs,
+        fat
+      );
+    } catch (error) {
+      logger.error("add meal plan item failed!");
+      throw error;
+    }
+  }
+
+  private async getMealPlanById(mealPlanId: string) {
+    const client = await this.pool.connect();
+    try {
+      const query = `
+        SELECT mp
+        FROM meal_plans mp
+        WHERE mp.id = $1
+      `;
+      const result = await client.query(query, [mealPlanId]);
+      return result.rows[0] || null;
+    } catch (error: any) {
+      logger.error("GET meal plan failed!: ", error.message);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -287,11 +349,11 @@ export class MealPlanGenerator {
       return {
         bmr: existingTarget.bmr,
         tdee: existingTarget.tdee,
-        targetCalories: existingTarget.calorieskcal,
+        targetCalories: existingTarget.caloriesKcal,
         macros: {
-          proteinG: existingTarget.proteing,
-          carbsG: existingTarget.carbsg,
-          fatG: existingTarget.fatg,
+          proteinG: existingTarget.proteinG,
+          carbsG: existingTarget.carbsG,
+          fatG: existingTarget.fatG,
         },
       };
     }
@@ -396,7 +458,7 @@ export class MealPlanGenerator {
 
   private async saveNutritionTarget(
     userId: string,
-    goadId: string,
+    goalId: string,
     calories: number,
     protein: number,
     carbs: number,
@@ -420,7 +482,7 @@ export class MealPlanGenerator {
 
       const nutritionTargetResult = await client.query(nutritionQuery, [
         userId,
-        goadId,
+        goalId,
         calories,
         protein,
         fat,
@@ -472,30 +534,30 @@ export class MealPlanGenerator {
     const result = await this.pool.query(
       `
       SELECT
-        mp.id as mealPlanId,
-        mp.user_id as userId,
-        mp.plan_date as planDate,
-        mp.total_calories as totalCalories,
-        mp.total_protein as totalProtein,
-        mp.total_carbs as totalCarbs,
-        mp.total_fat as totalFat,
-        mp.is_training_day isTrainingDay,
-        mp.base_calories as baseCalories,
-        mpi.display_order as displayOrder,
-        mpi.id as mealPlanItemId,
-        mpi.meal_time_id as mealTimeId,
-        mpi.servings,
-        mpi.is_completed as completed,
-        f.food_name as foodName,
-        f.food_name_vi as foodNameVi,
-        f.calories as foodCalories,
-        f.protein as foodProtein,
-        f.carbs as foodCarbs,
-        f.fat as foodFat,
-        f.fiber as foodFiber,
-        f.image_url as foodImage,
-        f.detailed_benefits as foodBenefits,
-        mt.code as mealtimecode
+        mp.id as "mealPlanId",
+        mp.user_id as "userId",
+        mp.plan_date as "planDate",
+        mp.total_calories as "totalCalories",
+        mp.total_protein as "totalProtein",
+        mp.total_carbs as "totalCarbs",
+        mp.total_fat as "totalFat",
+        mp.is_training_day as "isTrainingDay",
+        mp.base_calories as "baseCalories",
+        mpi.display_order as "displayOrder",
+        mpi.id as "mealPlanItemId",
+        mpi.meal_time_id as "mealTimeId",
+        mpi.servings as "servings",
+        mpi.is_completed as "completed",
+        f.food_name as "foodName",
+        f.food_name_vi as "foodNameVi",
+        f.calories as "foodCalories",
+        f.protein as "foodProtein",
+        f.carbs as "foodCarbs",
+        f.fat as "foodFat",
+        f.fiber as "foodFiber",
+        f.image_url as "foodImage",
+        f.detailed_benefits as "foodBenefits",
+        mt.code as "mealTimeCode"
       FROM meal_plans mp
       JOIN meal_plan_items mpi
       ON mp.id = mpi.meal_plan_id
@@ -513,16 +575,16 @@ export class MealPlanGenerator {
     const mealPlanDate = resultMealPlan[0].planDate;
     const isTrainingDay = resultMealPlan[0].isTrainingDay;
     const actualNutrition = {
-      calories: resultMealPlan[0].totalcalories,
-      protein: resultMealPlan[0].totalprotein,
-      carbs: resultMealPlan[0].totalcarbs,
-      fat: resultMealPlan[0].totalfat,
+      calories: resultMealPlan[0].totalCalories,
+      protein: resultMealPlan[0].totalProtein,
+      carbs: resultMealPlan[0].totalCarbs,
+      fat: resultMealPlan[0].totalFat,
     };
 
     const meals: any = {};
 
     const groupedMeals = resultMealPlan.reduce((acc, meal) => {
-      const key = meal.mealtimecode;
+      const key = meal.mealTimeCode;
       if (!acc[key]) {
         acc[key] = [];
       }
@@ -573,11 +635,46 @@ export class MealPlanGenerator {
     return goalResult.rows[0];
   }
 
-  private async saveMealPlanItem() {
+  private async saveMealPlanItem(
+    mealPlanId: string,
+    mealTimeId: string,
+    foodId: string,
+    nameVi: string,
+    servings: number,
+    calories: number,
+    protein: number,
+    carbs: number,
+    fat: number
+  ) {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-    } catch (error) {}
+      const itemQuery = `
+            INSERT INTO meal_plan_items (
+              meal_plan_id, meal_time_id, food_id, food_name,
+              servings, calories, protein, carbs, fat, display_order
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0)
+          `;
+
+      await client.query(itemQuery, [
+        mealPlanId,
+        mealTimeId,
+        foodId,
+        nameVi,
+        servings,
+        calories,
+        protein,
+        carbs,
+        fat,
+      ]);
+      await client.query("COMMIT");
+    } catch (error: any) {
+      logger.error("insert into table meal plan item failed!: ", error.message);
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   private async updateMacroMealPlan(
@@ -615,6 +712,31 @@ export class MealPlanGenerator {
       logger.error("UPDATE meal plan is failed!: ", error.message);
       await client.query("ROLLBACK");
       throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async checkMealPlanExist(
+    mealPlanId: string,
+    mealTimeId: string,
+    foodId: string
+  ) {
+    const client = await this.pool.connect();
+    try {
+      const query = `
+      SELECT mpi
+      FROM meal_plan_items mpi
+      WHERE mpi.meal_plan_id = $1 AND meal_time_id = $2 AND food_id = $3
+      `;
+
+      const result = await client.query(query, [
+        mealPlanId,
+        mealTimeId,
+        foodId,
+      ]);
+      return result.rows.length > 0;
+    } catch (error) {
     } finally {
       client.release();
     }

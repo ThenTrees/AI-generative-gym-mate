@@ -56,12 +56,17 @@ class MealPlanController {
 
   addToMealPlan = async (req: Request, res: Response) => {
     try {
-      const { mealPlanId, mealTimeId, foodId } = req.body;
-      await mealPlanGenerator.addFoodIntoMEalPlan(
+      const { mealPlanId, mealTimeId, foodId, servings } = req.body;
+      await mealPlanGenerator.addFoodIntoMealPlan(
         mealPlanId,
         mealTimeId,
-        foodId
+        foodId,
+        servings
       );
+      res.json({
+        success: true,
+        message: "add food to meal plan successfully!",
+      });
     } catch (error: any) {
       logger.error("add food to meal plan error:", error);
 

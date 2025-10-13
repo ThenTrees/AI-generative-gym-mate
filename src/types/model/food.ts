@@ -1,7 +1,7 @@
 export interface Food {
   id?: string;
-  foodName: string;
-  foodNameVi?: string;
+  foodName?: string;
+  foodNameVi: string;
   description?: string;
   servingWeightGrams: number;
   calories: number;
