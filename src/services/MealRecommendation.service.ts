@@ -16,7 +16,6 @@ export interface MealContext {
   targetCarbs: number;
   objective: Objective;
   isTrainingDay: boolean;
-  workoutContext?: "pre-workout" | "post-workout";
 }
 
 /**
@@ -172,21 +171,20 @@ export class MealRecommendationService {
       targetCarbs,
       objective,
       isTrainingDay,
-      workoutContext,
     } = context;
 
     // Base query
-    let query = `Bạn là chuyên gia dinh dưỡng Gym. Gợi ý cho tôi một món ăn cho ${mealTime.nameVi}. với ${targetCalories} calories bao gồm ${targetProtein} protein và ${targetCarbs} carbs. `;
+    let query = `Bạn là chuyên gia dinh dưỡng về Gym. Hãy gợi ý cho tôi những món ăn vào buổi ${mealTime.nameVi}. với ${targetCalories} calories, bao gồm ${targetProtein} protein và ${targetCarbs} carbs. `;
 
     // Add objective-specific requirements
     const objectiveMap = {
       [Objective.GAIN_MUSCLE]:
-        "Món ăn này cần giúp tăng cơ nạc, giàu protein nhưng hạn chế chất béo không cần thiết. ",
+        "Những món ăn này cần giúp tăng cơ nạc, giàu protein nhưng hạn chế chất béo không cần thiết. ",
       [Objective.LOSE_FAT]:
-        "Món ăn này cần hỗ trợ giảm mỡ, ít calo, ít đường và dầu mỡ. ",
+        "Những món ăn này cần hỗ trợ giảm mỡ, ít calo, ít đường và dầu mỡ. ",
       [Objective.ENDURANCE]:
-        "Món ăn này cần tối ưu cho sức bền, cung cấp nhiều carb phức. ",
-      [Objective.MAINTAIN]: "",
+        "Những món ăn này cần tối ưu cho sức bền, cung cấp nhiều carb phức. ",
+      [Objective.MAINTAIN]: "Những món ăn này giúp duy trì cân nặng hiện tại. ", // TODO: đưa cân nặng vào
     };
 
     if (objectiveMap[objective]) {
@@ -194,14 +192,10 @@ export class MealRecommendationService {
     }
 
     // Add workout context
-    if (isTrainingDay && workoutContext) {
-      if (workoutContext === "pre-workout") {
-        query +=
-          "Đây là bữa ăn quan trọng trước buổi tập, cần cung cấp năng lượng bền bỉ và dễ tiêu hóa. ";
-      } else if (workoutContext === "post-workout") {
-        query +=
-          "Đây là bữa ăn phục hồi sau tập, cần protein hấp thu tốt để sửa chữa cơ bắp. ";
-      }
+    if (isTrainingDay) {
+      query += " Lưu ý rằng hôm nay có lịch tập. ";
+    } else {
+      query += "Lưu ý rằng hôm nay không có lịch tập. ";
     }
 
     // Add general preferences

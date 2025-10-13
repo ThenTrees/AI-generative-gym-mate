@@ -58,8 +58,7 @@ export class MealPlanGenerator {
     targetProtein: number,
     targetCarbs: number,
     objective: Objective,
-    isTrainingDay: boolean,
-    workoutContext?: "pre-workout" | "post-workout"
+    isTrainingDay: boolean
   ): Promise<FoodRecommendation[]> {
     const context: MealContext = {
       mealTime,
@@ -68,7 +67,6 @@ export class MealPlanGenerator {
       targetCarbs,
       objective,
       isTrainingDay,
-      workoutContext,
     };
 
     return this.mealRecommendationService.generateMealRecommendations(context);
@@ -518,7 +516,10 @@ export class MealPlanGenerator {
         nt.carbs_g as "carbsG",
         nt.bmr,
         nt.tdee,
-        nt.goal_type
+        nt.goal_type,
+        nt.calory_for_breakfast as "caloryForBreakfast",
+        nt.calory_for_lunch as "caloryForLunch",
+        nt.calory_for_dinner as "caloryForDinner",
     FROM nutrition_targets nt
     WHERE user_id = $1 AND goal_id = $2 AND is_active = true
     `,
