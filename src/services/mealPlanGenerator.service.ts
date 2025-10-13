@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Pool, types } from "pg";
 import { MealTime } from "../types/model/mealTime";
 import { DATABASE_CONFIG } from "../configs/database";
 import { Objective } from "../common/common-enum";
@@ -18,7 +18,7 @@ import {
 import { logger } from "../utils/logger";
 import { foodVectorService } from "./FoodVector.service";
 import { Food } from "../types/model/food";
-
+types.setTypeParser(1082, (val) => val);
 export class MealPlanGenerator {
   private pool: Pool;
   private nutritionCalculationService: NutritionCalculationService;
@@ -555,6 +555,7 @@ export class MealPlanGenerator {
         f.carbs as "foodCarbs",
         f.fat as "foodFat",
         f.fiber as "foodFiber",
+        f.category as "category",
         f.image_url as "foodImage",
         f.detailed_benefits as "foodBenefits",
         mt.code as "mealTimeCode"

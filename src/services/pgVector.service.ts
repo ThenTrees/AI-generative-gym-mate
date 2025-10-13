@@ -1,4 +1,4 @@
-import { Client, Pool } from "pg";
+import { Client, Pool, types } from "pg";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { DATABASE_CONFIG } from "../configs/database";
 import { Exercise } from "../types/model/exercise.model";
@@ -6,7 +6,7 @@ import { ExerciseLoader } from "../loaders/exerciseLoader";
 import { EmbeddingDocument } from "../types/model/embeddingDocument.model";
 import { logger } from "../utils/logger";
 import { config } from "../configs/environment";
-
+types.setTypeParser(1082, (val) => val);
 export class PgVectorService {
   private pool: Pool;
   private genai: GoogleGenerativeAI;

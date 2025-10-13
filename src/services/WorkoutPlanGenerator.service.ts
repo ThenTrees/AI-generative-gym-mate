@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Pool, types } from "pg";
 import { PgVectorService } from "./pgVector.service";
 import { DATABASE_CONFIG } from "../configs/database";
 import { logger } from "../utils/logger";
@@ -28,7 +28,7 @@ import { SearchQuery } from "../types/model/SearchQuery";
 import { WorkoutCalculator } from "../utils/calculators";
 import { WORKOUT_CONSTANTS } from "../utils/constants";
 import { ta } from "date-fns/esm/locale";
-
+types.setTypeParser(1082, (val) => val);
 class WorkoutPlanGeneratorService {
   private pool: Pool;
   private pgVectorService: PgVectorService;

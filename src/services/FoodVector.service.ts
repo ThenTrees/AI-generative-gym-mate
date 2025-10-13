@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Pool, types } from "pg";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { DATABASE_CONFIG } from "../configs/database";
 import { logger } from "../utils/logger";
@@ -15,7 +15,7 @@ export interface FoodEmbeddingDocument {
   metadata: any;
   similarity: number;
 }
-
+types.setTypeParser(1082, (val) => val);
 export class FoodVectorService {
   private pool: Pool;
   private genai: GoogleGenerativeAI;
