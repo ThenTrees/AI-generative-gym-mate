@@ -6,7 +6,7 @@ import generationRoute from "./gym-plan";
 import mealPlanRoute from "./meal-plan";
 
 router.use("/health", healthRoute);
-router.use("/v1/api/ai", generationRoute);
-router.use("/v1/api/ai/nutrition", mealPlanRoute);
+router.use("/api/v1/ai", generationRoute);
+router.use("/api/v1/ai/nutrition", mealPlanRoute);
 
 export default router;

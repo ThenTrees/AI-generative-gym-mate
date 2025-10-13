@@ -1,11 +1,9 @@
-import { userProfileSchema } from "./../utils/validators";
 import { Pool } from "pg";
 import { MealTime } from "../types/model/mealTime";
 import { DATABASE_CONFIG } from "../configs/database";
 import { Objective } from "../common/common-enum";
 import { MealPlan } from "../types/model/mealPlan";
 import { FoodRecommendation } from "../types/model/foodRecommendation";
-import { NutritionTarget } from "../types/model/nutritionTarget";
 import { convertDateFormat } from "../utils/convert";
 import {
   NutritionCalculationService,
@@ -17,6 +15,7 @@ import {
   MealRecommendationService,
   MealContext,
 } from "./MealRecommendation.service";
+import { logger } from "../utils/logger";
 
 export class MealPlanGenerator {
   private pool: Pool;
@@ -123,9 +122,11 @@ export class MealPlanGenerator {
 
     console.log("\n🍽️  Generating meal plan...");
 
+    const planDateTransfer = convertDateFormat(planDate.toLocaleDateString());
+
     const mealPlanExist = await this.getMealPlanByUserIdAndPlanDate(
       userId,
-      convertDateFormat(planDate.toLocaleDateString())
+      planDateTransfer
     );
 
     const meals: any = {};
@@ -199,35 +200,71 @@ export class MealPlanGenerator {
     }
   }
 
-  async updateMealPlanItemStatus(
-    mealPlanItemId: string,
-    mealPlanId: string,
-    mealTimeId: string,
-    foodId: string
-  ) {
+  // link to meal plan => update macro
+  async updateMealPlanItemStatus(mealPlanItemId: string, completed: boolean) {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
 
-      // Insert meal plan
-      const updateMealPlanItemStatus = `
-        Update INTO meal_plan_items 
-        SET is_completed = true, completed_at = NOW()
-        WHERE id = $1 AND meal_plan_id = $2 AND meal_time_id = $3 AND food_id = $4
-      `;
-
-      const updateMealPlanItemStatusResult = await client.query(
-        updateMealPlanItemStatus,
-        [mealPlanItemId, mealPlanId, mealTimeId, foodId]
+      const itemQuery = await client.query(
+        `SELECT 
+           mpi.meal_plan_id, 
+           mpi.is_completed
+         FROM meal_plan_items mpi
+         WHERE mpi.id = $1 FOR UPDATE`, // "FOR UPDATE" để khóa hàng này lại
+        [mealPlanItemId]
       );
-      await client.query("COMMIT");
 
-      return updateMealPlanItemStatusResult;
-    } catch (error) {
+      if (itemQuery.rows.length === 0) {
+        throw new Error("Meal plan item not found");
+      }
+
+      const itemData = itemQuery.rows[0];
+      const oldCompletedStatus = itemData.is_completed;
+      if (oldCompletedStatus !== completed) {
+        // Insert meal plan
+        const updateMealPlanItemStatus = `
+        UPDATE meal_plan_items 
+        SET 
+          is_completed = $1, 
+          completed_at = CASE WHEN $1 = true THEN NOW() ELSE NULL END
+        WHERE id = $2
+        RETURNING id, meal_plan_id, servings, calories, protein, carbs, fat 
+      `;
+        const updateMealPlanItemStatusResult = await client.query(
+          updateMealPlanItemStatus,
+          [completed, mealPlanItemId]
+        );
+        await client.query("COMMIT");
+
+        const operator = completed ? "+" : "-";
+
+        await this.updateMacroMealPlan(
+          updateMealPlanItemStatusResult.rows[0].meal_plan_id,
+          parseFloat(updateMealPlanItemStatusResult.rows[0].calories),
+          parseFloat(updateMealPlanItemStatusResult.rows[0].protein),
+          parseFloat(updateMealPlanItemStatusResult.rows[0].carbs),
+          parseFloat(updateMealPlanItemStatusResult.rows[0].fat),
+          operator
+        );
+      }
+    } catch (error: any) {
+      logger.error("completed food error: ", error.message);
       await client.query("ROLLBACK");
     } finally {
       client.release();
     }
+  }
+
+  // add food into meal plan => insert new record meal plan item
+  async addFoodIntoMEalPlan(
+    mealPlanId: string,
+    mealTimeId: string,
+    foodId: string
+  ) {
+    // check meal plan already exist
+    // get meal time
+    // get info food id || TODO:
   }
 
   /**
@@ -521,6 +558,7 @@ export class MealPlanGenerator {
     );
     return profileResult.rows[0];
   }
+
   private async getGoalByUser(userId: string) {
     const goalResult = await this.pool.query(
       `
@@ -533,6 +571,53 @@ export class MealPlanGenerator {
       [userId]
     );
     return goalResult.rows[0];
+  }
+
+  private async saveMealPlanItem() {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+    } catch (error) {}
+  }
+
+  private async updateMacroMealPlan(
+    mealPlanId: string,
+    totalCalories: number,
+    protein: number,
+    carbs: number,
+    fat: number,
+    operator: string
+  ) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Insert meal plan
+      const updateMealPlanQuery = `
+        UPDATE meal_plans
+        SET total_calories = total_calories ${operator} $1,
+            total_protein = total_protein ${operator} $2,
+            total_carbs = total_carbs ${operator} $3,
+            total_fat = total_fat ${operator} $4
+        WHERE id = $5
+      `;
+
+      const mealPlanResult = await client.query(updateMealPlanQuery, [
+        totalCalories,
+        protein,
+        carbs,
+        fat,
+        mealPlanId,
+      ]);
+
+      await client.query("COMMIT");
+    } catch (error: any) {
+      logger.error("UPDATE meal plan is failed!: ", error.message);
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }
 
