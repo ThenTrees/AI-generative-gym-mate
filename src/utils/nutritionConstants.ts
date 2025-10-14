@@ -4,6 +4,11 @@ import { Objective } from "../common/common-enum";
  * Constants for nutrition calculations and meal planning
  */
 export const NUTRITION_CONSTANTS = {
+
+  // number food items of the meal recommendation
+  DEFAULT_DISHES_PER_MEAL: 4,
+
+
   // Scoring weights
   SIMILARITY_WEIGHT: 70,
   PROTEIN_BONUS: 15,
