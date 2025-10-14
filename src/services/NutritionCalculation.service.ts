@@ -23,6 +23,10 @@ export interface NutritionTarget {
     carbsG: number;
     fatG: number;
   };
+  caloriesForBreakfast?: number;
+  caloriesForLunch?: number;
+  caloriesForDiner?: number;
+  isTraining?: boolean;
 }
 
 export interface MealNutrition {

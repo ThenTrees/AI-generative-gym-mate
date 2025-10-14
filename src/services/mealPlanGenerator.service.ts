@@ -139,6 +139,10 @@ export class MealPlanGenerator {
           protein: nutritionTarget.macros.proteinG,
           carbs: nutritionTarget.macros.carbsG,
           fat: nutritionTarget.macros.fatG,
+          caloriesForBreakfast: nutritionTarget.caloriesForBreakfast,
+          caloriesForLunch: nutritionTarget.caloriesForLunch,
+          caloriesForDinner: nutritionTarget.caloriesForDiner,
+          isTrainingDay: nutritionTarget.isTraining,
         },
       };
     } else {
@@ -340,7 +344,8 @@ export class MealPlanGenerator {
     // Check if nutrition target already exists
     const existingTarget = await this.checkTargetNutritionAlready(
       userId,
-      goal.id
+      goal.id,
+      isTrainingDay
     );
 
     if (existingTarget) {
@@ -353,6 +358,10 @@ export class MealPlanGenerator {
           carbsG: existingTarget.carbsG,
           fatG: existingTarget.fatG,
         },
+        caloriesForBreakfast: parseInt(existingTarget.suggestForBreakfast),
+        caloriesForLunch: parseInt(existingTarget.suggestForLunch),
+        caloriesForDiner: parseInt(existingTarget.suggestForDinner),
+        isTraining: existingTarget.isTraining,
       };
     }
 
@@ -365,6 +374,21 @@ export class MealPlanGenerator {
         workoutCalories
       );
 
+    const mealTimes = await this.getMealTimes();
+
+    const allMealNutritions = [];
+    for (const mealTime of mealTimes) {
+      const mealNutrition =
+        this.nutritionCalculationService.calculateMealNutrition(
+          nutritionTarget,
+          mealTime.defaultCaloriePercentage
+        );
+
+      allMealNutritions.push({
+        mealTime: mealTime.code,
+        nutrition: mealNutrition,
+      });
+    }
     // Save to database
     await this.saveNutritionTarget(
       userId,
@@ -375,7 +399,11 @@ export class MealPlanGenerator {
       nutritionTarget.macros.fatG,
       nutritionTarget.bmr,
       nutritionTarget.tdee,
-      goal.objective
+      goal.objective,
+      allMealNutritions[0].nutrition.calories,
+      allMealNutritions[1].nutrition.calories,
+      allMealNutritions[2].nutrition.calories,
+      isTrainingDay
     );
 
     return nutritionTarget;
@@ -463,7 +491,11 @@ export class MealPlanGenerator {
     fat: number,
     bmr: number,
     tdee: number,
-    goalType: Objective
+    goalType: Objective,
+    caloriesForBreakfast: number,
+    caloriesForLunch: number,
+    caloriesForDiner: number,
+    isTraining: boolean
   ) {
     const client = await this.pool.connect();
     try {
@@ -473,8 +505,8 @@ export class MealPlanGenerator {
       const nutritionQuery = `
         INSERT INTO nutrition_targets (
           user_id, goal_id, calories_kcal, protein_g, fat_g, carbs_g,
-          bmr, tdee, goal_type, is_active
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'true')
+          bmr, tdee, goal_type, is_active, suggestion_calories_for_breakfast, suggestion_calories_for_lunch, suggestion_calories_for_dinner, is_training
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'true', $10, $11, $12, $13)
         RETURNING id
       `;
 
@@ -488,6 +520,10 @@ export class MealPlanGenerator {
         bmr,
         tdee,
         goalType,
+        caloriesForBreakfast,
+        caloriesForLunch,
+        caloriesForDiner,
+        isTraining,
       ]);
       const nutritionTargetId = nutritionTargetResult.rows[0].id;
       await client.query("COMMIT");
@@ -502,7 +538,8 @@ export class MealPlanGenerator {
 
   private async checkTargetNutritionAlready(
     userId: string,
-    goalId: string
+    goalId: string,
+    isTraining: boolean
   ): Promise<any> {
     const result = await this.pool.query(
       `
@@ -517,13 +554,14 @@ export class MealPlanGenerator {
         nt.bmr,
         nt.tdee,
         nt.goal_type,
-        nt.calory_for_breakfast as "caloryForBreakfast",
-        nt.calory_for_lunch as "caloryForLunch",
-        nt.calory_for_dinner as "caloryForDinner",
+        nt.suggestion_calories_for_breakfast as "suggestForBreakfast",
+        nt.suggestion_calories_for_lunch as "suggestForLunch",
+        nt.suggestion_calories_for_dinner as "suggestForDinner",
+        nt.is_training as "isTraining"
     FROM nutrition_targets nt
-    WHERE user_id = $1 AND goal_id = $2 AND is_active = true
+    WHERE user_id = $1 AND goal_id = $2 AND is_training = $3 AND is_active = true
     `,
-      [userId, goalId]
+      [userId, goalId, isTraining]
     );
     return result.rows[0];
   }
