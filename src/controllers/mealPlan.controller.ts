@@ -1,7 +1,6 @@
 import { mealPlanGenerator } from "./../services/mealPlanGenerator.service";
 import { NextFunction, Request, Response } from "express";
 import { logger } from "../utils/logger";
-import SuccessResponse from "../types/response/success.response";
 class MealPlanController {
   constructor() {}
 
@@ -11,12 +10,11 @@ class MealPlanController {
     next: NextFunction
   ) => {
     try {
-      const { userId, date, sessionId } = req.body;
+      const { userId, date } = req.body;
 
       const mealPlan = await mealPlanGenerator.generateDayMealPlan(
         userId,
-        new Date(date || Date.now()),
-        sessionId
+        new Date(date || Date.now())
       );
 
       res.json({
@@ -69,6 +67,27 @@ class MealPlanController {
       });
     } catch (error: any) {
       logger.error("add food to meal plan error:", error);
+
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  };
+
+  getMealPlanDay = async (req: Request, res: Response) => {
+    try {
+      const { userId, date } = req.params;
+      const mealPlan = await mealPlanGenerator.getMealPlanUserId(
+        userId,
+        new Date(date || Date.now())
+      );
+      res.json({
+        success: true,
+        data: mealPlan,
+      });
+    } catch (error: any) {
+      logger.error("get meal plan date error:", error);
 
       res.status(500).json({
         success: false,

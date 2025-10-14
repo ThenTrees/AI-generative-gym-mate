@@ -5,6 +5,7 @@ import mealPlanController from "../../controllers/mealPlan.controller";
 const router = express.Router();
 
 // router.post("/search", mealPlanController.generateMealPlanForUser);
+router.get("/meal-plan/:userId", mealPlanController.getMealPlanDay);
 router.post("/meal-plan/generate", mealPlanController.generateMealPlanForUser);
 // eated
 router.patch(

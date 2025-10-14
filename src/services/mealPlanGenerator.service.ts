@@ -34,6 +34,81 @@ export class MealPlanGenerator {
     this.nutritionCalculationService = new NutritionCalculationService();
     this.mealRecommendationService = new MealRecommendationService();
   }
+
+  private async checkScheduleWorkout(userId: string, planDate: string) {
+    const client = await this.pool.connect();
+    try {
+      const query = `
+      SELECT p.id FROM plans p
+      JOIN plan_days pd ON p.id = pd.plan_id
+      WHERE p.user_id = $1 AND pd.scheduled_date = $2
+      `;
+      const result = await client.query(query, [userId, planDate]);
+      if (result.rows.length > 0) return result.rows[0] || null;
+    } catch (error: any) {
+      logger.error("get scheduled workout failed!");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getMealPlanUserId(userId: string, mealPlanDate: Date) {
+    const profile = await this.getProfile(userId);
+    if (!profile) {
+      throw new Error("User profile not found");
+    }
+
+    const goal = await this.getGoalByUser(userId);
+    if (!goal) {
+      throw new Error("No active goal found");
+    }
+
+    const transferDate = convertDateFormat(mealPlanDate.toLocaleDateString());
+
+    let isTrainingDay = false;
+
+    // Check if training day
+    const trainingDay = await this.checkScheduleWorkout(userId, transferDate);
+    if (trainingDay) {
+      isTrainingDay = true;
+    }
+    let workoutCalories = 0;
+
+    if (isTrainingDay) {
+      // Would calculate based on session data
+      workoutCalories = 400; // Placeholder
+    }
+    // Get or calculate nutrition targets
+    const nutritionTarget = await this.getOrCalculateNutritionTarget(
+      userId,
+      profile,
+      goal,
+      isTrainingDay,
+      workoutCalories
+    );
+
+    // get meal plan for current day by userId
+
+    const mealPlanResult = await this.getMealPlanByUserIdAndPlanDate(
+      userId,
+      transferDate
+    );
+    return {
+      ...mealPlanResult,
+      targetNutrition: {
+        calories: nutritionTarget.targetCalories,
+        protein: nutritionTarget.macros.proteinG,
+        carbs: nutritionTarget.macros.carbsG,
+        fat: nutritionTarget.macros.fatG,
+        caloriesForBreakfast: nutritionTarget.caloriesForBreakfast,
+        caloriesForLunch: nutritionTarget.caloriesForLunch,
+        caloriesForDinner: nutritionTarget.caloriesForDiner,
+        isTrainingDay: nutritionTarget.isTraining,
+      },
+    };
+  }
+
   /**
    * Get meal time distribution
    */
@@ -75,11 +150,7 @@ export class MealPlanGenerator {
   /**
    * Generate complete meal plan
    */
-  async generateDayMealPlan(
-    userId: string,
-    planDate: Date,
-    sessionId?: string
-  ): Promise<any> {
+  async generateDayMealPlan(userId: string, planDate: Date): Promise<any> {
     // Get user profile
     const profile = await this.getProfile(userId);
     if (!profile) {
@@ -91,12 +162,20 @@ export class MealPlanGenerator {
     if (!goal) {
       throw new Error("No active goal found");
     }
+    const planDateTransfer = convertDateFormat(planDate.toLocaleDateString());
+    // Check if training day
+    let isTrainingDay = false;
 
     // Check if training day
-    const isTrainingDay = !!sessionId; // if sessionId = null, undefined or "" return false <=> true
+    const trainingDay = await this.checkScheduleWorkout(
+      userId,
+      planDateTransfer
+    );
+    if (trainingDay) {
+      isTrainingDay = true;
+    }
     let workoutCalories = 0;
-
-    if (isTrainingDay && sessionId) {
+    if (isTrainingDay) {
       // Would calculate based on session data
       workoutCalories = 400; // Placeholder
     }
@@ -121,8 +200,6 @@ export class MealPlanGenerator {
     const mealTimes = await this.getMealTimes();
 
     logger.info("🍽️  Generating meal plan...");
-
-    const planDateTransfer = convertDateFormat(planDate.toLocaleDateString());
 
     const mealPlanExist = await this.getMealPlanByUserIdAndPlanDate(
       userId,
@@ -322,6 +399,27 @@ export class MealPlanGenerator {
         WHERE mp.id = $1
       `;
       const result = await client.query(query, [mealPlanId]);
+      return result.rows[0] || null;
+    } catch (error: any) {
+      logger.error("GET meal plan failed!: ", error.message);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async getMealPlanByUserIdAndDate(
+    userId: string,
+    mealPlanDate: string
+  ) {
+    const client = await this.pool.connect();
+    try {
+      const query = `
+        SELECT mp
+        FROM meal_plans mp
+        WHERE mp.user_id = $1 AND mp.plan_date = $2
+      `;
+      const result = await client.query(query, [userId, mealPlanDate]);
       return result.rows[0] || null;
     } catch (error: any) {
       logger.error("GET meal plan failed!: ", error.message);
