@@ -148,7 +148,12 @@ export class MealRecommendationService {
     food: Food,
     targetCalories: number
   ): number {
-    const ratio = targetCalories / (food.calories || 100);
+    const dishesPerMeal = NUTRITION_CONSTANTS.DEFAULT_DISHES_PER_MEAL || 4;
+    const perDishCalories = targetCalories / dishesPerMeal;
+
+    // Tính tỷ lệ dựa trên per-dish calories thay vì toàn bữa
+    const ratio = perDishCalories / (food.calories || 100);
+
     const grams = Math.min(
       NUTRITION_CONSTANTS.MAX_SERVING_GRAMS,
       Math.max(NUTRITION_CONSTANTS.MIN_SERVING_GRAMS, ratio * 100)
@@ -159,6 +164,7 @@ export class MealRecommendationService {
       NUTRITION_CONSTANTS.SERVING_ROUND_TO
     );
   }
+
 
   /**
    * Build meal query for vector search
