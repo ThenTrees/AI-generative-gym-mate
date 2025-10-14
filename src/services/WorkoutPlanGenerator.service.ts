@@ -1,3 +1,7 @@
+import {
+  MealPlanGenerator,
+  mealPlanGenerator,
+} from "./mealPlanGenerator.service";
 import { Pool, types } from "pg";
 import { PgVectorService } from "./pgVector.service";
 import { DATABASE_CONFIG } from "../configs/database";
@@ -27,16 +31,18 @@ import { RestPeriods } from "../types/model/RestPeriods";
 import { SearchQuery } from "../types/model/SearchQuery";
 import { WorkoutCalculator } from "../utils/calculators";
 import { WORKOUT_CONSTANTS } from "../utils/constants";
-import { ta } from "date-fns/esm/locale";
+
 types.setTypeParser(1082, (val) => val);
 class WorkoutPlanGeneratorService {
   private pool: Pool;
   private pgVectorService: PgVectorService;
   private workoutCalculator: WorkoutCalculator;
+  private mealPlanGenerator: MealPlanGenerator;
   constructor() {
     this.pool = new Pool(DATABASE_CONFIG);
     this.pgVectorService = new PgVectorService();
     this.workoutCalculator = new WorkoutCalculator();
+    this.mealPlanGenerator = new MealPlanGenerator();
   }
   async initialize(): Promise<void> {
     logger.info("Initializing Workout Plan Generator Service...");
@@ -55,20 +61,33 @@ class WorkoutPlanGeneratorService {
     );
     const startTime = Date.now();
     try {
+      // check user profile already exist
+      const profile = await mealPlanGenerator.getProfile(request.userId);
+      if (!profile) {
+        throw new Error("User profile not found");
+      }
+
+      const goal = await mealPlanGenerator.getGoalByUser(request.userId);
+      if (!goal) {
+        throw new Error("No active goal found");
+      }
       // Step 1: Analyze user requirements and build search strategy
-      const planStrategy = this.analyzePlanRequirements(request);
+      const planStrategy = this.analyzePlanRequirements(profile, goal);
 
       // Step 2: Find relevant exercises using RAG
       const selectedExercises = await this.selectExercisesUsingRAG(
-        request,
+        profile,
+        goal,
         planStrategy
       );
 
       // Step 3: Generate workout splits
-      const workoutSplits = this.generateWorkoutSplits(request, planStrategy);
+      const workoutSplits = this.generateWorkoutSplits(goal, planStrategy);
 
       // Step 4: Create plan structure in database
       const plan = await this.createPlanInDatabase(
+        profile,
+        goal,
         request,
         workoutSplits,
         selectedExercises
@@ -79,7 +98,8 @@ class WorkoutPlanGeneratorService {
         plan,
         workoutSplits,
         selectedExercises,
-        request
+        profile,
+        goal
       );
 
       const generationTime = Date.now() - startTime;
@@ -119,8 +139,10 @@ class WorkoutPlanGeneratorService {
    * @param request
    * @returns
    */
-  private analyzePlanRequirements(request: PlanRequest): PlanStrategy {
-    const { userProfile, goal } = request;
+  private analyzePlanRequirements(
+    userProfile: UserProfile,
+    goal: Goal
+  ): PlanStrategy {
     return {
       primaryObjective: goal.objectiveType,
       experienceLevel: userProfile.fitnessLevel,
@@ -399,13 +421,18 @@ class WorkoutPlanGeneratorService {
   }
 
   private async selectExercisesUsingRAG(
-    request: PlanRequest,
+    userProfile: UserProfile,
+    goal: Goal,
     strategy: PlanStrategy
   ): Promise<ExerciseWithScore[]> {
     logger.info("Selecting exercises using RAG system...");
 
     // Build comprehensive search queries for different movement patterns
-    const searchQueries = this.buildMovementPatternQueries(request, strategy);
+    const searchQueries = this.buildMovementPatternQueries(
+      userProfile,
+      goal,
+      strategy
+    );
 
     const allExercises: ExerciseWithScore[] = [];
 
@@ -452,10 +479,10 @@ class WorkoutPlanGeneratorService {
   }
 
   private buildMovementPatternQueries(
-    request: PlanRequest,
+    userProfile: UserProfile,
+    goal: Goal,
     strategy: PlanStrategy
   ): SearchQuery[] {
-    const { userProfile, goal } = request;
     const queries: SearchQuery[] = [];
 
     // Core movement patterns for comprehensive training
@@ -843,10 +870,9 @@ class WorkoutPlanGeneratorService {
   }
 
   private generateWorkoutSplits(
-    request: PlanRequest,
+    goal: Goal,
     strategy: PlanStrategy
   ): WorkoutSplit[] {
-    const { goal } = request;
     const splits: WorkoutSplit[] = [];
 
     switch (strategy.sessionStructure.type) {
@@ -1066,6 +1092,8 @@ class WorkoutPlanGeneratorService {
   }
 
   private async createPlanInDatabase(
+    userProfile: UserProfile,
+    goal: Goal,
     request: PlanRequest,
     workoutSplits: WorkoutSplit[],
     exercises: ExerciseWithScore[]
@@ -1084,11 +1112,11 @@ class WorkoutPlanGeneratorService {
       `,
         [
           request.userId,
-          request.goalId || null,
-          `${request.goal.objectiveType.replace("_", " ")} Training Plan`, // TODO: nên sinh ra tên phù hợp hơn
-          `${request.goal.sessionsPerWeek} sessions/week - ${request.goal.sessionMinutes} min/session`,
+          goal.id || null,
+          `${goal.objectiveType.replace("_", " ")} Training Plan`, // TODO: nên sinh ra tên phù hợp hơn
+          `${goal.sessionsPerWeek} sessions/week - ${goal.sessionMinutes} min/session`,
           "AI",
-          request.goal.sessionsPerWeek,
+          goal.sessionsPerWeek,
           "DRAFT",
           JSON.stringify({
             totalExercises: exercises.length,
@@ -1098,8 +1126,8 @@ class WorkoutPlanGeneratorService {
             workoutSplits: workoutSplits.map((s) => s.name),
           }),
           JSON.stringify({
-            userProfile: request.userProfile,
-            goal: request.goal,
+            userProfile: userProfile,
+            goal: goal,
           }),
         ]
       );
@@ -1131,7 +1159,8 @@ class WorkoutPlanGeneratorService {
     plan: Plan,
     workoutSplits: WorkoutSplit[],
     exercises: ExerciseWithScore[],
-    request: PlanRequest
+    profile: UserProfile,
+    goal: Goal
   ): Promise<PlanDay[]> {
     const client = await this.pool.connect();
     const planDays: PlanDay[] = [];
@@ -1139,11 +1168,7 @@ class WorkoutPlanGeneratorService {
     try {
       await client.query("BEGIN");
 
-      for (
-        let dayIndex = 0;
-        dayIndex < request.goal.sessionsPerWeek;
-        dayIndex++
-      ) {
+      for (let dayIndex = 0; dayIndex < goal.sessionsPerWeek; dayIndex++) {
         const split = workoutSplits[dayIndex];
 
         // Insert plan_day
@@ -1157,7 +1182,7 @@ class WorkoutPlanGeneratorService {
             plan.id,
             dayIndex + 1,
             split.name,
-            this.calculateScheduledDate(dayIndex, request.goal.sessionsPerWeek),
+            this.calculateScheduledDate(dayIndex, goal.sessionsPerWeek),
           ]
         );
 
@@ -1166,8 +1191,7 @@ class WorkoutPlanGeneratorService {
         // Select exercises for this split
         const selectedExercises = this.selectExercisesForSplit(
           split,
-          exercises,
-          request
+          exercises
         );
 
         // Generate plan items
@@ -1181,8 +1205,8 @@ class WorkoutPlanGeneratorService {
           const exerciseData = selectedExercises[itemIndex];
           const prescription = this.generatePrescription(
             exerciseData.exercise,
-            request.userProfile,
-            request.goal,
+            profile,
+            goal,
             split
           );
 
@@ -1198,10 +1222,7 @@ class WorkoutPlanGeneratorService {
               exerciseData.exercise.id,
               itemIndex + 1,
               JSON.stringify(prescription),
-              this.generateExerciseNote(
-                exerciseData.exercise,
-                request.userProfile
-              ),
+              this.generateExerciseNote(exerciseData.exercise, profile),
               exerciseData.similarityScore,
             ]
           );
@@ -1210,10 +1231,7 @@ class WorkoutPlanGeneratorService {
             exercise: exerciseData.exercise,
             itemIndex: itemIndex + 1,
             prescription,
-            note: this.generateExerciseNote(
-              exerciseData.exercise,
-              request.userProfile
-            ),
+            note: this.generateExerciseNote(exerciseData.exercise, profile),
             // similarityScore: exerciseData.similarityScore,
           });
         }
@@ -1239,8 +1257,7 @@ class WorkoutPlanGeneratorService {
 
   private selectExercisesForSplit(
     split: WorkoutSplit,
-    availableExercises: ExerciseWithScore[],
-    request: PlanRequest
+    availableExercises: ExerciseWithScore[]
   ): ExerciseWithScore[] {
     // Filter exercises by movement patterns and muscles
     let relevantExercises = availableExercises.filter((exerciseData) => {

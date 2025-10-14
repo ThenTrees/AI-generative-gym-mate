@@ -497,7 +497,7 @@ export class MealPlanGenerator {
       nutritionTarget.macros.fatG,
       nutritionTarget.bmr,
       nutritionTarget.tdee,
-      goal.objective,
+      goal.objectiveType,
       allMealNutritions[0].nutrition.calories,
       allMealNutritions[1].nutrition.calories,
       allMealNutritions[2].nutrition.calories,
@@ -739,7 +739,7 @@ export class MealPlanGenerator {
     };
   }
 
-  private async getProfile(userId: string) {
+  async getProfile(userId: string) {
     const profileResult = await this.pool.query(
       `
       SELECT 
@@ -759,10 +759,10 @@ export class MealPlanGenerator {
     return profileResult.rows[0];
   }
 
-  private async getGoalByUser(userId: string) {
+  async getGoalByUser(userId: string) {
     const goalResult = await this.pool.query(
       `
-      SELECT id, objective, sessions_per_week as "sessionsPerWeek"
+      SELECT id, objective as "objectiveType", sessions_per_week as "sessionsPerWeek"
       FROM goals
       WHERE user_id = $1 AND status = 'ACTIVE' AND is_deleted = false
       ORDER BY created_at DESC

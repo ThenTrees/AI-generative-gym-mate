@@ -10,7 +10,7 @@ export interface UserProfile {
 
 export interface Goal {
   id: string;
-  objective: Objective;
+  objectiveType: Objective;
   sessionsPerWeek: number;
 }
 
@@ -120,11 +120,11 @@ export class NutritionCalculationService {
     const tdee = Math.round(this.calculateTDEE(bmr, goal.sessionsPerWeek));
     const targetCalories = this.calculateTargetCalories(
       tdee,
-      goal.objective,
+      goal.objectiveType,
       isTrainingDay,
       workoutCalories
     );
-    const macros = this.calculateMacros(targetCalories, goal.objective);
+    const macros = this.calculateMacros(targetCalories, goal.objectiveType);
 
     return {
       bmr,
