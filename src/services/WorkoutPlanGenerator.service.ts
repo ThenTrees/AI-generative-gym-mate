@@ -178,30 +178,64 @@ class WorkoutPlanGeneratorService {
   private determineSessionStructure(goal: Goal): SessionStructure {
     const { sessionsPerWeek, sessionMinutes } = goal;
 
+    // Calculate optimal exercises per session (5-8 range)
+    const exercisesPerSession = this.calculateOptimalExerciseCount(
+      sessionsPerWeek,
+      sessionMinutes
+    );
+
     if (sessionsPerWeek <= 2) {
       return {
         type: "full_body",
-        exercisesPerSession: Math.floor(sessionMinutes / 8),
+        exercisesPerSession,
         splitStrategy: "minimal_frequency",
       };
     } else if (sessionsPerWeek <= 3) {
       return {
         type: "full_body_varied",
-        exercisesPerSession: Math.floor(sessionMinutes / 7),
+        exercisesPerSession,
         splitStrategy: "moderate_frequency",
       };
     } else if (sessionsPerWeek <= 4) {
       return {
         type: "upper_lower",
-        exercisesPerSession: Math.floor(sessionMinutes / 6),
+        exercisesPerSession,
         splitStrategy: "upper_lower_split",
       };
     } else {
       return {
         type: "body_part_split",
-        exercisesPerSession: Math.floor(sessionMinutes / 5),
+        exercisesPerSession,
         splitStrategy: "high_frequency",
       };
+    }
+  }
+
+  /**
+   * Calculate optimal number of exercises per session (5-8 range)
+   * @param sessionsPerWeek - Number of sessions per week
+   * @param sessionMinutes - Duration of each session in minutes
+   * @returns number - Optimal exercises per session (5-8)
+   */
+  private calculateOptimalExerciseCount(
+    sessionsPerWeek: number,
+    sessionMinutes: number
+  ): number {
+    // Fixed logic: Always return 5-8 exercises regardless of session duration
+    // This prevents overwhelming users with too many exercises
+
+    if (sessionsPerWeek <= 2) {
+      // Low frequency = more exercises per session (6-8)
+      return 7; // Balanced for low frequency
+    } else if (sessionsPerWeek <= 3) {
+      // Moderate frequency = balanced (5-7)
+      return 6; // Good balance
+    } else if (sessionsPerWeek <= 4) {
+      // High frequency = fewer exercises per session (5-6)
+      return 5; // Minimal for high frequency
+    } else {
+      // Very high frequency = minimal exercises per session (5-6)
+      return 5; // Minimal for very high frequency
     }
   }
 
@@ -1404,11 +1438,12 @@ class WorkoutPlanGeneratorService {
       return b.similarityScore - a.similarityScore;
     });
 
-    // Select exercises ensuring variety
+    // Select exercises ensuring variety and respecting the 5-8 limit
     const selected: ExerciseWithScore[] = [];
     const usedPatterns = new Set<string>();
     const usedMuscles = new Set<string>();
 
+    // First pass: Select exercises with high priority and variety
     for (const exerciseData of relevantExercises) {
       if (selected.length >= split.exerciseCount) break;
 
@@ -1416,26 +1451,34 @@ class WorkoutPlanGeneratorService {
       const patternKey = exerciseData.movementPattern;
       const muscleKey = exercise.primaryMuscle.toString();
 
-      // Ensure pattern variety
-      if (
-        selected.length < 3 ||
-        !usedPatterns.has(patternKey) ||
-        usedPatterns.size < split.movementPatterns.length
-      ) {
+      // Prioritize variety in movement patterns and muscle groups
+      const shouldAdd =
+        selected.length < 3 || // Always add first 3 exercises
+        !usedPatterns.has(patternKey) || // New movement pattern
+        !usedMuscles.has(muscleKey) || // New muscle group
+        usedPatterns.size < split.movementPatterns.length; // Need more pattern variety
+
+      if (shouldAdd) {
         selected.push(exerciseData);
         usedPatterns.add(patternKey);
         usedMuscles.add(muscleKey);
       }
     }
 
-    // Fill remaining slots if needed
+    // Second pass: Fill remaining slots if we haven't reached the target
     if (selected.length < split.exerciseCount) {
       const remaining = relevantExercises.filter(
         (ex) => !selected.some((sel) => sel.exercise.id === ex.exercise.id)
       );
-      selected.push(
-        ...remaining.slice(0, split.exerciseCount - selected.length)
-      );
+
+      // Add remaining exercises up to the limit
+      const needed = split.exerciseCount - selected.length;
+      selected.push(...remaining.slice(0, needed));
+    }
+
+    // Ensure we don't exceed the limit (safety check)
+    if (selected.length > split.exerciseCount) {
+      return selected.slice(0, split.exerciseCount);
     }
 
     return selected;
