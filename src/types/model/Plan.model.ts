@@ -9,6 +9,7 @@ export interface Plan {
   planDays: PlanDay[];
   totalWeeks: number; // tổng số tuần
   createdAt: string;
+  endDate: string;
   aiMetadata?: Record<string, any>;
   generationParams?: Record<string, any>;
 }

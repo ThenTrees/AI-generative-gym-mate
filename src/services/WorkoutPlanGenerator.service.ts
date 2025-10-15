@@ -31,8 +31,10 @@ import { RestPeriods } from "../types/model/RestPeriods";
 import { SearchQuery } from "../types/model/SearchQuery";
 import { WorkoutCalculator } from "../utils/calculators";
 import { WORKOUT_CONSTANTS } from "../utils/constants";
+import dayjs from "dayjs";
 
 types.setTypeParser(1082, (val) => val);
+
 class WorkoutPlanGeneratorService {
   private pool: Pool;
   private pgVectorService: PgVectorService;
@@ -81,19 +83,29 @@ class WorkoutPlanGeneratorService {
         planStrategy
       );
 
-      // Step 3: Generate workout splits
+      // Step 3: Calculate suggested weeks for the plan
+      const suggestedWeeks = this.calculateSuggestedWeeks(profile, goal);
+      logger.info(
+        `[WorkoutPlanService] - Suggested plan duration: ${suggestedWeeks} weeks`
+      );
+
+      // Step 4: Generate workout splits
       const workoutSplits = this.generateWorkoutSplits(goal, planStrategy);
 
-      // Step 4: Create plan structure in database
+      const currentDate = dayjs();
+      const endDate = currentDate.add(suggestedWeeks, "week");
+      // Step 5: Create plan structure in database
       const plan = await this.createPlanInDatabase(
         profile,
         goal,
         request,
         workoutSplits,
-        selectedExercises
+        selectedExercises,
+        endDate,
+        suggestedWeeks
       );
 
-      // Step 5: Generate detailed plan days and items
+      // Step 6: Generate detailed plan days and items
       const planDays = await this.generatePlanDays(
         plan,
         workoutSplits,
@@ -294,6 +306,87 @@ class WorkoutPlanGeneratorService {
       logger.info("health for user very good!");
     }
     return considerations;
+  }
+
+  /**
+   * Calculate suggested number of weeks for the workout plan based on user profile and goal
+   * @param userProfile - User's fitness profile
+   * @param goal - User's fitness goal
+   * @returns number - Suggested number of weeks
+   */
+  private calculateSuggestedWeeks(
+    userProfile: UserProfile,
+    goal: Goal
+  ): number {
+    const fitnessLevel = userProfile.fitnessLevel;
+    const objective = goal.objectiveType;
+
+    // Get base weeks from constants
+    let suggestedWeeks =
+      WORKOUT_CONSTANTS.SUGGESTED_WEEKS[fitnessLevel][objective];
+
+    // Adjust based on user's specific circumstances
+    const adjustments = this.calculateWeekAdjustments(userProfile, goal);
+    suggestedWeeks += adjustments;
+
+    // Ensure minimum and maximum bounds
+    const minWeeks = 4;
+    const maxWeeks = 16;
+
+    return Math.max(minWeeks, Math.min(maxWeeks, suggestedWeeks));
+  }
+
+  /**
+   * Calculate adjustments to suggested weeks based on user profile and goal specifics
+   * @param userProfile - User's fitness profile
+   * @param goal - User's fitness goal
+   * @returns number - Week adjustments (can be positive or negative)
+   */
+  private calculateWeekAdjustments(
+    userProfile: UserProfile,
+    goal: Goal
+  ): number {
+    let adjustments = 0;
+
+    // Health considerations adjustments
+    if (userProfile.healthNote) {
+      const healthNote = userProfile.healthNote.toLowerCase();
+
+      // If user has health issues, suggest longer plan for gradual progression
+      if (
+        healthNote.includes("knee") ||
+        healthNote.includes("back") ||
+        healthNote.includes("shoulder") ||
+        healthNote.includes("hip")
+      ) {
+        adjustments += 2; // Add 2 weeks for safer progression
+      }
+    }
+
+    // Session frequency adjustments
+    if (goal.sessionsPerWeek <= 2) {
+      adjustments += 2; // Fewer sessions per week = longer plan needed
+    } else if (goal.sessionsPerWeek >= 5) {
+      adjustments -= 1; // More sessions per week = can be shorter
+    }
+
+    // Session duration adjustments
+    if (goal.sessionMinutes <= 30) {
+      adjustments += 1; // Shorter sessions = longer plan needed
+    } else if (goal.sessionMinutes >= 90) {
+      adjustments -= 1; // Longer sessions = can be shorter
+    }
+
+    // Age considerations (if available in user profile)
+    if (userProfile.age) {
+      if (userProfile.age > 50) {
+        adjustments += 1; // Older users may need more gradual progression
+      } else if (userProfile.age < 25) {
+        adjustments -= 1; // Younger users can progress faster
+      }
+    }
+
+    return adjustments;
   }
 
   /**
@@ -1096,27 +1189,39 @@ class WorkoutPlanGeneratorService {
     goal: Goal,
     request: PlanRequest,
     workoutSplits: WorkoutSplit[],
-    exercises: ExerciseWithScore[]
+    exercises: ExerciseWithScore[],
+    endDate: dayjs.Dayjs,
+    suggestedWeeks: number
   ): Promise<Plan> {
     const client = await this.pool.connect();
 
     try {
       await client.query("BEGIN");
 
+      // Generate AI-suggested title
+      const aiGeneratedTitle = this.generatePlanTitle(
+        userProfile,
+        goal,
+        suggestedWeeks
+      );
+      logger.info(
+        `[WorkoutPlanService] - Generated title: "${aiGeneratedTitle}"`
+      );
+
       // Insert plan
       const planResult = await client.query(
         `
-        INSERT INTO plans (user_id, goal_id, title, description, source, cycle_weeks, status, ai_metadata, generation_params)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO plans (user_id, goal_id, title, description, source, cycle_weeks, status, ai_metadata, generation_params, end_date)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *
       `,
         [
           request.userId,
           goal.id || null,
-          `${goal.objectiveType.replace("_", " ")} Training Plan`, // TODO: nên sinh ra tên phù hợp hơn
+          aiGeneratedTitle,
           `${goal.sessionsPerWeek} sessions/week - ${goal.sessionMinutes} min/session`,
           "AI",
-          goal.sessionsPerWeek,
+          suggestedWeeks,
           "DRAFT",
           JSON.stringify({
             totalExercises: exercises.length,
@@ -1124,11 +1229,20 @@ class WorkoutPlanGeneratorService {
               exercises.reduce((sum, e) => sum + e.similarityScore, 0) /
               exercises.length,
             workoutSplits: workoutSplits.map((s) => s.name),
+            suggestedWeeks: suggestedWeeks,
+            planDuration: `${suggestedWeeks} weeks`,
+            titleGeneration: {
+              aiGenerated: true,
+              originalTemplate: aiGeneratedTitle.split(" (")[0], // Remove duration/frequency suffixes
+              customizationApplied:
+                aiGeneratedTitle !== aiGeneratedTitle.split(" (")[0],
+            },
           }),
           JSON.stringify({
             userProfile: userProfile,
             goal: goal,
           }),
+          endDate,
         ]
       );
 
@@ -1144,6 +1258,7 @@ class WorkoutPlanGeneratorService {
         description: plan.description,
         totalWeeks: plan.cycle_weeks,
         createdAt: plan.created_at,
+        endDate: plan.end_date,
         planDays: [], // Will be populated by generatePlanDays
         aiMetadata: plan.ai_metadata,
         generationParams: plan.generation_params,
@@ -1628,6 +1743,351 @@ class WorkoutPlanGeneratorService {
 
     // Trả về chuỗi YYYY-MM-DD
     return scheduledDate.toISOString().split("T")[0];
+  }
+
+  /**
+   * Generate an AI-suggested title for the workout plan based on user profile and goal
+   * @param userProfile - User's fitness profile
+   * @param goal - User's fitness goal
+   * @param suggestedWeeks - Suggested duration in weeks
+   * @returns string - AI-generated plan title
+   */
+  private generatePlanTitle(
+    userProfile: UserProfile,
+    goal: Goal,
+    suggestedWeeks: number
+  ): string {
+    const fitnessLevel = userProfile.fitnessLevel;
+    const objective = goal.objectiveType;
+    const sessionsPerWeek = goal.sessionsPerWeek;
+    const sessionMinutes = goal.sessionMinutes;
+
+    // Create contextual title based on user profile and goals
+    const titleTemplates = this.getTitleTemplates(fitnessLevel, objective);
+    const selectedTemplate = this.selectBestTemplate(
+      titleTemplates,
+      userProfile,
+      goal,
+      suggestedWeeks
+    );
+
+    return this.customizeTitle(
+      selectedTemplate,
+      userProfile,
+      goal,
+      suggestedWeeks
+    );
+  }
+
+  /**
+   * Get title templates based on fitness level and objective
+   */
+  private getTitleTemplates(fitnessLevel: string, objective: string): string[] {
+    const templates = {
+      BEGINNER: {
+        LOSE_FAT: [
+          "Beginner's Fat Loss Journey",
+          "Start Your Weight Loss Transformation",
+          "Foundation Fat Burn Program",
+          "Beginner's Weight Loss Challenge",
+          "Your First Fat Loss Adventure",
+        ],
+        GAIN_MUSCLE: [
+          "Beginner's Muscle Building Program",
+          "Start Building Your Strength",
+          "Foundation Muscle Growth Plan",
+          "Your First Muscle Building Journey",
+          "Beginner's Strength Development",
+        ],
+        ENDURANCE: [
+          "Beginner's Endurance Builder",
+          "Start Your Fitness Journey",
+          "Foundation Cardio Program",
+          "Beginner's Stamina Challenge",
+          "Your First Endurance Adventure",
+        ],
+        MAINTAIN: [
+          "Beginner's Wellness Program",
+          "Start Your Healthy Lifestyle",
+          "Foundation Fitness Plan",
+          "Beginner's Health Journey",
+          "Your First Wellness Program",
+        ],
+      },
+      INTERMEDIATE: {
+        LOSE_FAT: [
+          "Advanced Fat Loss Transformation",
+          "Intermediate Weight Loss Challenge",
+          "Serious Fat Burn Program",
+          "Intermediate Body Recomposition",
+          "Advanced Weight Loss Journey",
+        ],
+        GAIN_MUSCLE: [
+          "Intermediate Muscle Building Program",
+          "Advanced Strength Development",
+          "Serious Muscle Growth Plan",
+          "Intermediate Hypertrophy Program",
+          "Advanced Muscle Building Journey",
+        ],
+        ENDURANCE: [
+          "Intermediate Endurance Challenge",
+          "Advanced Cardio Program",
+          "Serious Stamina Builder",
+          "Intermediate Fitness Challenge",
+          "Advanced Endurance Journey",
+        ],
+        MAINTAIN: [
+          "Intermediate Wellness Program",
+          "Advanced Health Maintenance",
+          "Serious Fitness Plan",
+          "Intermediate Lifestyle Program",
+          "Advanced Wellness Journey",
+        ],
+      },
+      ADVANCED: {
+        LOSE_FAT: [
+          "Elite Fat Loss Program",
+          "Advanced Body Recomposition",
+          "Expert Weight Loss Challenge",
+          "Elite Fat Burn Transformation",
+          "Advanced Fat Loss Mastery",
+        ],
+        GAIN_MUSCLE: [
+          "Elite Muscle Building Program",
+          "Advanced Hypertrophy Challenge",
+          "Expert Strength Development",
+          "Elite Muscle Growth Plan",
+          "Advanced Muscle Mastery",
+        ],
+        ENDURANCE: [
+          "Elite Endurance Program",
+          "Advanced Cardio Challenge",
+          "Expert Stamina Builder",
+          "Elite Fitness Challenge",
+          "Advanced Endurance Mastery",
+        ],
+        MAINTAIN: [
+          "Elite Wellness Program",
+          "Advanced Health Mastery",
+          "Expert Fitness Plan",
+          "Elite Lifestyle Program",
+          "Advanced Wellness Mastery",
+        ],
+      },
+    };
+
+    return (
+      (templates as any)[fitnessLevel]?.[objective] || [
+        `${objective.replace("_", " ")} Training Program`,
+        `${fitnessLevel} ${objective.replace("_", " ")} Program`,
+        "Personalized Training Plan",
+      ]
+    );
+  }
+
+  /**
+   * Select the best template based on user context
+   */
+  private selectBestTemplate(
+    templates: string[],
+    userProfile: UserProfile,
+    goal: Goal,
+    suggestedWeeks: number
+  ): string {
+    // Consider user's health status, age, and plan duration for template selection
+    let selectedTemplate = templates[0]; // Default to first template
+
+    // Health considerations
+    if (userProfile.healthNote) {
+      const healthNote = userProfile.healthNote.toLowerCase();
+      if (healthNote.includes("knee") || healthNote.includes("back")) {
+        // Choose more conservative titles
+        selectedTemplate =
+          templates.find(
+            (t) =>
+              t.toLowerCase().includes("foundation") ||
+              t.toLowerCase().includes("start")
+          ) || templates[0];
+      }
+    }
+
+    // Plan duration considerations
+    if (suggestedWeeks >= 10) {
+      // Longer plans - choose more comprehensive titles
+      selectedTemplate =
+        templates.find(
+          (t) =>
+            t.toLowerCase().includes("journey") ||
+            t.toLowerCase().includes("transformation") ||
+            t.toLowerCase().includes("program")
+        ) || templates[0];
+    } else if (suggestedWeeks <= 6) {
+      // Shorter plans - choose more focused titles
+      selectedTemplate =
+        templates.find(
+          (t) =>
+            t.toLowerCase().includes("challenge") ||
+            t.toLowerCase().includes("start")
+        ) || templates[0];
+    }
+
+    return selectedTemplate;
+  }
+
+  /**
+   * Customize the selected template with user-specific details
+   */
+  private customizeTitle(
+    template: string,
+    userProfile: UserProfile,
+    goal: Goal,
+    suggestedWeeks: number
+  ): string {
+    let customizedTitle = template;
+
+    // Add duration context for longer plans
+    if (suggestedWeeks >= 12) {
+      customizedTitle += ` (${suggestedWeeks}-Week Program)`;
+    } else if (suggestedWeeks >= 8) {
+      customizedTitle += ` (${suggestedWeeks}-Week Challenge)`;
+    }
+
+    // Add frequency context for specific cases
+    if (goal.sessionsPerWeek <= 2) {
+      customizedTitle += " - Low Frequency";
+    } else if (goal.sessionsPerWeek >= 5) {
+      customizedTitle += " - High Frequency";
+    }
+
+    // Add session duration context
+    if (goal.sessionMinutes <= 30) {
+      customizedTitle += " - Quick Sessions";
+    } else if (goal.sessionMinutes >= 90) {
+      customizedTitle += " - Extended Sessions";
+    }
+
+    return customizedTitle;
+  }
+
+  /**
+   * Demo function to show how the AI title generation works
+   * This can be used for testing and demonstration purposes
+   */
+  public demonstrateTitleGeneration(
+    fitnessLevel: string,
+    objective: string,
+    sessionsPerWeek: number,
+    sessionMinutes: number,
+    suggestedWeeks: number,
+    hasHealthIssues: boolean = false,
+    age?: number
+  ): {
+    generatedTitle: string;
+    templates: string[];
+    selectedTemplate: string;
+    customization: string;
+  } {
+    // Create mock objects for demonstration
+    const mockProfile: Partial<UserProfile> = {
+      fitnessLevel: fitnessLevel as any,
+      healthNote: hasHealthIssues ? "knee problems" : undefined,
+      age: age,
+    };
+
+    const mockGoal: Partial<Goal> = {
+      objectiveType: objective as any,
+      sessionsPerWeek,
+      sessionMinutes,
+    };
+
+    const templates = this.getTitleTemplates(fitnessLevel, objective);
+    const selectedTemplate = this.selectBestTemplate(
+      templates,
+      mockProfile as UserProfile,
+      mockGoal as Goal,
+      suggestedWeeks
+    );
+    const generatedTitle = this.customizeTitle(
+      selectedTemplate,
+      mockProfile as UserProfile,
+      mockGoal as Goal,
+      suggestedWeeks
+    );
+
+    let customization = "No customization applied";
+    if (generatedTitle !== selectedTemplate) {
+      const customizations = [];
+      if (suggestedWeeks >= 12) customizations.push("Duration suffix");
+      if (suggestedWeeks >= 8) customizations.push("Challenge suffix");
+      if (sessionsPerWeek <= 2) customizations.push("Low frequency");
+      if (sessionsPerWeek >= 5) customizations.push("High frequency");
+      if (sessionMinutes <= 30) customizations.push("Quick sessions");
+      if (sessionMinutes >= 90) customizations.push("Extended sessions");
+      customization = customizations.join(", ");
+    }
+
+    return {
+      generatedTitle,
+      templates,
+      selectedTemplate,
+      customization,
+    };
+  }
+
+  /**
+   * Demo function to show how the suggested weeks calculation works
+   * This can be used for testing and demonstration purposes
+   */
+  public demonstrateSuggestedWeeks(
+    fitnessLevel: string,
+    objective: string,
+    sessionsPerWeek: number,
+    sessionMinutes: number,
+    hasHealthIssues: boolean = false,
+    age?: number
+  ): {
+    baseWeeks: number;
+    adjustments: number;
+    finalWeeks: number;
+    explanation: string;
+  } {
+    // Create mock objects for demonstration
+    const mockProfile: Partial<UserProfile> = {
+      fitnessLevel: fitnessLevel as any,
+      healthNote: hasHealthIssues ? "knee problems" : undefined,
+      age: age,
+    };
+
+    const mockGoal: Partial<Goal> = {
+      objectiveType: objective as any,
+      sessionsPerWeek,
+      sessionMinutes,
+    };
+
+    const baseWeeks =
+      WORKOUT_CONSTANTS.SUGGESTED_WEEKS[
+        fitnessLevel as keyof typeof WORKOUT_CONSTANTS.SUGGESTED_WEEKS
+      ][objective as keyof typeof WORKOUT_CONSTANTS.SUGGESTED_WEEKS.BEGINNER];
+    const adjustments = this.calculateWeekAdjustments(
+      mockProfile as UserProfile,
+      mockGoal as Goal
+    );
+    const finalWeeks = baseWeeks + adjustments;
+
+    let explanation = `Base weeks for ${fitnessLevel} ${objective}: ${baseWeeks}`;
+    if (adjustments > 0) {
+      explanation += `\n+${adjustments} weeks adjustments (health/session considerations)`;
+    } else if (adjustments < 0) {
+      explanation += `\n${adjustments} weeks adjustments (high frequency/long sessions)`;
+    }
+    explanation += `\nFinal suggested duration: ${finalWeeks} weeks`;
+
+    return {
+      baseWeeks,
+      adjustments,
+      finalWeeks,
+      explanation,
+    };
   }
 
   async close(): Promise<void> {
