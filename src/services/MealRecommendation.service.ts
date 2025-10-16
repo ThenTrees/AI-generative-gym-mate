@@ -8,14 +8,20 @@ import {
 import { MealTime } from "../types/model/mealTime";
 import { Food } from "../types/model/food";
 import { FoodRecommendation } from "../types/model/foodRecommendation";
-
+import { Pool } from "pg";
+import { DATABASE_CONFIG } from "../configs/database";
+import { logger } from "../utils/logger";
 export interface MealContext {
   mealTime: MealTime;
   targetCalories: number;
   targetProtein: number;
   targetCarbs: number;
+  targetFat?: number;
   objective: Objective;
   isTrainingDay: boolean;
+  userWeight?: number;
+  userHeight?: number;
+  userGender?: string;
 }
 
 /**
@@ -24,8 +30,14 @@ export interface MealContext {
 export class MealRecommendationService {
   private foodVectorService: FoodVectorService;
   private pgVectorService: PgVectorService;
-
+  private pool: Pool;
   constructor() {
+    this.pool = new Pool({
+      ...DATABASE_CONFIG,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000,
+    });
     this.foodVectorService = new FoodVectorService();
     this.pgVectorService = new PgVectorService();
   }
@@ -34,10 +46,12 @@ export class MealRecommendationService {
    * Generate meal recommendations for a specific meal time
    */
   async generateMealRecommendations(
-    context: MealContext
+    context: MealContext,
+    userId: string
   ): Promise<FoodRecommendation[]> {
+    const excludedIds = await this.getFoodIdNear2Day(userId);
     // Build search query
-    const query = this.buildMealQuery(context);
+    const query = await this.buildMealQuery(context);
 
     // Generate query embedding
     const queryEmbedding = await this.pgVectorService.embed(query);
@@ -52,6 +66,7 @@ export class MealRecommendationService {
         mealTime: context.mealTime.code,
         maxCalories: maxCalories,
       },
+      excludedIds,
       NUTRITION_CONSTANTS.DEFAULT_SEARCH_LIMIT
     );
 
@@ -75,6 +90,27 @@ export class MealRecommendationService {
     return recommendations
       .sort((a, b) => b.score - a.score)
       .slice(0, NUTRITION_CONSTANTS.MAX_RECOMMENDATIONS);
+  }
+
+  private async getFoodIdNear2Day(userId: string) {
+    const client = await this.pool.connect();
+    try {
+      const recentFoods = await client.query(
+        `
+          SELECT mpi.food_id
+          FROM meal_plan_items mpi
+          JOIN meal_plans mp ON mpi.meal_plan_id = mp.id
+          WHERE mp.user_id = $1 AND mp.plan_date >= CURRENT_DATE - INTERVAL '2 days' AND mpi.is_completed = true;
+        `,
+        [userId]
+      );
+      return recentFoods.rows.map((f) => f.food_id);
+    } catch (error) {
+      logger.error("get food failed!");
+      return [];
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -165,32 +201,49 @@ export class MealRecommendationService {
     );
   }
 
-
   /**
    * Build meal query for vector search
    */
-  private buildMealQuery(context: MealContext): string {
+  private async buildMealQuery(context: MealContext): Promise<string> {
     const {
       mealTime,
       targetCalories,
       targetProtein,
       targetCarbs,
+      targetFat,
       objective,
       isTrainingDay,
+      userWeight,
+      userHeight,
+      userGender,
     } = context;
-
     // Base query
-    let query = `Bạn là chuyên gia dinh dưỡng về Gym. Hãy gợi ý cho tôi những món ăn vào buổi ${mealTime.nameVi}. với ${targetCalories} calories, bao gồm ${targetProtein} protein và ${targetCarbs} carbs. `;
+    let query = `Bạn là chuyên gia dinh dưỡng về Gym. Hãy gợi ý cho tôi những món ăn vào buổi ${mealTime.nameVi}. với ${targetCalories} calories, bao gồm ${targetProtein} protein và ${targetCarbs} carbs `;
+
+    if (targetFat) query += ` và ${targetFat}g chất béo.`;
+    else query += ".";
+
+    if (userWeight || userHeight || userGender) {
+      query += ` Tôi  `;
+      if (userGender)
+        query += `${
+          userGender.toLocaleLowerCase() === "male" ? "là nam" : "là nữ"
+        }`;
+      if (userWeight) query += `, nặng ${userWeight}kg`;
+      if (userHeight) query += `, cao ${userHeight}cm`;
+      query += `. `;
+    }
 
     // Add objective-specific requirements
     const objectiveMap = {
       [Objective.GAIN_MUSCLE]:
-        "Những món ăn này cần giúp tăng cơ nạc, giàu protein nhưng hạn chế chất béo không cần thiết. ",
+        "Mục tiêu là tăng cơ nạc, ưu tiên thực phẩm giàu protein, carb chất lượng và ít chất béo xấu. ",
       [Objective.LOSE_FAT]:
-        "Những món ăn này cần hỗ trợ giảm mỡ, ít calo, ít đường và dầu mỡ. ",
+        "Mục tiêu là giảm mỡ, nên ưu tiên món ít calo, nhiều chất xơ và ít đường, dầu mỡ. ",
       [Objective.ENDURANCE]:
-        "Những món ăn này cần tối ưu cho sức bền, cung cấp nhiều carb phức. ",
-      [Objective.MAINTAIN]: "Những món ăn này giúp duy trì cân nặng hiện tại. ", // TODO: đưa cân nặng vào
+        "Mục tiêu là tăng sức bền, cần cân đối giữa carb phức và protein vừa phải. ",
+      [Objective.MAINTAIN]:
+        "Mục tiêu là duy trì cân nặng hiện tại với tỷ lệ dinh dưỡng cân đối. ",
     };
 
     if (objectiveMap[objective]) {
@@ -199,9 +252,10 @@ export class MealRecommendationService {
 
     // Add workout context
     if (isTrainingDay) {
-      query += " Lưu ý rằng hôm nay có lịch tập. ";
+      query += "Hôm nay là ngày tập luyện. ";
     } else {
-      query += "Lưu ý rằng hôm nay không có lịch tập. ";
+      query +=
+        "Hôm nay là ngày nghỉ, nên giảm lượng carb và calo nhẹ so với ngày tập. ";
     }
 
     // Add general preferences

@@ -132,19 +132,31 @@ export class MealPlanGenerator {
     targetCalories: number,
     targetProtein: number,
     targetCarbs: number,
+    targetFat: number,
     objective: Objective,
-    isTrainingDay: boolean
+    isTrainingDay: boolean,
+    userId: string,
+    userWeight: number,
+    userHeight: number,
+    userGender: string
   ): Promise<FoodRecommendation[]> {
     const context: MealContext = {
       mealTime,
       targetCalories,
       targetProtein,
       targetCarbs,
+      targetFat,
       objective,
       isTrainingDay,
+      userWeight,
+      userHeight,
+      userGender,
     };
 
-    return this.mealRecommendationService.generateMealRecommendations(context);
+    return this.mealRecommendationService.generateMealRecommendations(
+      context,
+      userId
+    );
   }
 
   /**
@@ -238,8 +250,13 @@ export class MealPlanGenerator {
           mealNutrition.calories,
           mealNutrition.protein,
           mealNutrition.carbs,
-          goal.objective,
-          isTrainingDay
+          mealNutrition.fat,
+          goal.objectiveType,
+          isTrainingDay,
+          userId,
+          profile.weightKg,
+          profile.heightCm,
+          profile.gender
         );
       }
 
