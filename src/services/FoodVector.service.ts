@@ -143,52 +143,6 @@ export class FoodVectorService {
     }
   }
 
-  // async similaritySearch(
-  //   query: string,
-  //   k: number = 20,
-  //   threshold: number = 0.25
-  // ): Promise<FoodEmbeddingDocument[]> {
-  //   logger.info(`Searching similar foods: "${query}" (k=${k})`);
-  //   const queryEmbedding = await this.embed(query);
-  //   const client = await this.pool.connect();
-  //   try {
-  //     const result = await client.query(
-  //       `
-  //       SELECT
-  //         fe.id,
-  //         fe.food_id,
-  //         fe.content,
-  //         fe.metadata,
-  //         1 - (fe.embedding <=> $1::vector) AS similarity
-  //       FROM food_embeddings fe
-  //       WHERE 1 - (fe.embedding <=> $1::vector) > $3
-  //       ORDER BY fe.embedding <=> $1::vector
-  //       LIMIT $2
-  //     `,
-  //       [`[${queryEmbedding.join(",")}]`, k, threshold]
-  //     );
-
-  //     return result.rows.map((row: any) => ({
-  //       id: row.id,
-  //       foodId: row.food_id,
-  //       content: row.content,
-  //       metadata: row.metadata,
-  //       similarity: parseFloat(row.similarity),
-  //     }));
-  //   } finally {
-  //     client.release();
-  //   }
-  // }
-
-  /**
-   * Vector similarity search
-   */
-  /**
-
-   * Vector similarity search
-
-   */
-
   async searchFoodsByVector(
     queryEmbedding: number[],
 
@@ -201,6 +155,8 @@ export class FoodVectorService {
 
       maxCalories?: number;
     } = {},
+
+    excludedIds: string[],
 
     limit: number = 20
   ): Promise<any[]> {
@@ -242,6 +198,15 @@ export class FoodVectorService {
       paramIndex++;
     }
 
+    if (excludedIds.length > 0) {
+      const placeholders = excludedIds
+        .map((_, i) => `$${i + paramIndex}`)
+        .join(", ");
+      whereClause += ` AND f.id NOT IN (${placeholders})`;
+      params.push(...excludedIds);
+      paramIndex += excludedIds.length;
+    }
+
     params.push(limit);
 
     const query = `
@@ -260,7 +225,7 @@ export class FoodVectorService {
             JOIN foods f ON f.id = fe.food_id
             ${whereClause}
             ORDER BY fe.embedding <=> $1::vector
-            LIMIT $${paramIndex}
+            LIMIT $${params.length}
           `;
     const result = await this.pool.query(query, params);
     return result.rows;
