@@ -3,6 +3,8 @@ import { IntensityLevel } from "./intensityLevel";
 import { SessionStructure } from "./sessionStructure";
 import { VolumeTargets } from "./volumeTargets";
 
+import { ProgressiveOverloadConfig } from "./progressiveOverload";
+
 export interface PlanStrategy {
   primaryObjective: string;
   experienceLevel: string;
@@ -11,4 +13,5 @@ export interface PlanStrategy {
   specialConsiderations: HealthConsideration[];
   intensityLevel: IntensityLevel;
   volumeTargets: VolumeTargets;
+  progressiveOverloadConfig: ProgressiveOverloadConfig;
 }

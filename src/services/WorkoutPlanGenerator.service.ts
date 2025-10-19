@@ -31,6 +31,11 @@ import { RestPeriods } from "../types/model/restPeriods";
 import { SearchQuery } from "../types/model/searchQuery";
 import { WorkoutCalculator } from "../utils/calculators";
 import { WORKOUT_CONSTANTS } from "../utils/constants";
+import {
+  ProgressiveOverloadConfig,
+  ProgressiveOverloadCalculator,
+  WeeklyProgression,
+} from "../types/model/progressiveOverload";
 import dayjs from "dayjs";
 
 types.setTypeParser(1082, (val) => val);
@@ -90,7 +95,11 @@ class WorkoutPlanGeneratorService {
       );
 
       // Step 4: Generate workout splits
-      const workoutSplits = this.generateWorkoutSplits(goal, planStrategy);
+      const workoutSplits = this.generateWorkoutSplits(
+        goal,
+        planStrategy,
+        suggestedWeeks
+      );
 
       const currentDate = dayjs();
       const endDate = currentDate.add(suggestedWeeks, "week");
@@ -102,7 +111,8 @@ class WorkoutPlanGeneratorService {
         workoutSplits,
         selectedExercises,
         endDate,
-        suggestedWeeks
+        suggestedWeeks,
+        planStrategy
       );
 
       // Step 6: Generate detailed plan days and items
@@ -155,6 +165,8 @@ class WorkoutPlanGeneratorService {
     userProfile: UserProfile,
     goal: Goal
   ): PlanStrategy {
+    const suggestedWeeks = this.calculateSuggestedWeeks(userProfile, goal);
+
     return {
       primaryObjective: goal.objectiveType,
       experienceLevel: userProfile.fitnessLevel,
@@ -167,6 +179,13 @@ class WorkoutPlanGeneratorService {
       intensityLevel: this.calculateIntensityLevel(userProfile, goal),
       // set, rep suitable for user based on level and objective
       volumeTargets: this.calculateVolumeTargets(goal, userProfile),
+      // progressive overload configuration
+      progressiveOverloadConfig:
+        ProgressiveOverloadCalculator.createDefaultConfig(
+          userProfile.fitnessLevel,
+          goal.objectiveType,
+          suggestedWeeks
+        ),
     };
   }
 
@@ -998,43 +1017,90 @@ class WorkoutPlanGeneratorService {
 
   private generateWorkoutSplits(
     goal: Goal,
-    strategy: PlanStrategy
+    strategy: PlanStrategy,
+    totalWeeks: number
   ): WorkoutSplit[] {
     const splits: WorkoutSplit[] = [];
 
     switch (strategy.sessionStructure.type) {
       case "full_body":
         splits.push(
-          ...this.generateFullBodySplits(goal.sessionsPerWeek, strategy)
+          ...this.generateFullBodySplits(
+            goal.sessionsPerWeek,
+            strategy,
+            totalWeeks
+          )
         );
         break;
       case "full_body_varied":
         splits.push(
-          ...this.generateVariedFullBodySplits(goal.sessionsPerWeek, strategy)
+          ...this.generateVariedFullBodySplits(
+            goal.sessionsPerWeek,
+            strategy,
+            totalWeeks
+          )
         );
         break;
       case "upper_lower":
         splits.push(
-          ...this.generateUpperLowerSplits(goal.sessionsPerWeek, strategy)
+          ...this.generateUpperLowerSplits(
+            goal.sessionsPerWeek,
+            strategy,
+            totalWeeks
+          )
         );
         break;
       case "body_part_split":
         splits.push(
-          ...this.generateBodyPartSplits(goal.sessionsPerWeek, strategy)
+          ...this.generateBodyPartSplits(
+            goal.sessionsPerWeek,
+            strategy,
+            totalWeeks
+          )
         );
         break;
     }
 
-    return splits;
+    // Apply progressive overload to all splits
+    return this.applyProgressiveOverloadToSplits(
+      splits,
+      strategy.progressiveOverloadConfig
+    );
+  }
+
+  private applyProgressiveOverloadToSplits(
+    splits: WorkoutSplit[],
+    progressiveConfig: ProgressiveOverloadConfig
+  ): WorkoutSplit[] {
+    return splits.map((split, index) => {
+      const week = Math.floor(index / 7) + 1; // Assuming 7 sessions per week max
+      const weeklyProgression =
+        ProgressiveOverloadCalculator.calculateWeeklyProgression(
+          progressiveConfig,
+          week,
+          Math.ceil(splits.length / 7) // Total weeks
+        );
+
+      return {
+        ...split,
+        weeklyProgression,
+        phase: weeklyProgression.phase,
+        isDeloadWeek: weeklyProgression.isDeloadWeek,
+        intensityLevel: Math.round(
+          split.intensityLevel * weeklyProgression.intensityModifier
+        ),
+      };
+    });
   }
 
   private generateFullBodySplits(
     sessionsPerWeek: number,
-    strategy: PlanStrategy
+    strategy: PlanStrategy,
+    totalWeeks: number
   ): WorkoutSplit[] {
     const splits: WorkoutSplit[] = [];
 
-    for (let i = 0; i < sessionsPerWeek; i++) {
+    for (let i = 0; i < sessionsPerWeek * totalWeeks; i++) {
       splits.push({
         name: `Full Body ${i + 1}`, // must generate from AI, diverse title for plan day.
         focus: "full_body",
@@ -1062,7 +1128,8 @@ class WorkoutPlanGeneratorService {
 
   private generateVariedFullBodySplits(
     sessionsPerWeek: number,
-    strategy: PlanStrategy
+    strategy: PlanStrategy,
+    totalWeeks: number
   ): WorkoutSplit[] {
     const splitVariations = [
       {
@@ -1118,17 +1185,23 @@ class WorkoutPlanGeneratorService {
       },
     ];
 
-    return splitVariations.slice(0, sessionsPerWeek).map((split, index) => ({
-      ...split,
-      focus: "full_body",
-      exerciseCount: strategy.sessionStructure.exercisesPerSession,
-      intensityLevel: strategy.intensityLevel.level,
-    }));
+    const totalSessions = sessionsPerWeek * totalWeeks;
+    const result = Array.from({ length: totalSessions }, (_, i) => {
+      const split = splitVariations[i % splitVariations.length];
+      return {
+        ...split,
+        focus: "full_body",
+        exerciseCount: strategy.sessionStructure.exercisesPerSession,
+        intensityLevel: strategy.intensityLevel.level,
+      };
+    });
+    return result;
   }
 
   private generateUpperLowerSplits(
     sessionsPerWeek: number,
-    strategy: PlanStrategy
+    strategy: PlanStrategy,
+    totalWeeks: number
   ): WorkoutSplit[] {
     const upperSplit: WorkoutSplit = {
       name: "Upper Body",
@@ -1167,7 +1240,7 @@ class WorkoutPlanGeneratorService {
     };
 
     const splits: WorkoutSplit[] = [];
-    for (let i = 0; i < sessionsPerWeek; i++) {
+    for (let i = 0; i < sessionsPerWeek * totalWeeks; i++) {
       splits.push(i % 2 === 0 ? upperSplit : lowerSplit);
     }
 
@@ -1176,7 +1249,8 @@ class WorkoutPlanGeneratorService {
 
   private generateBodyPartSplits(
     sessionsPerWeek: number,
-    strategy: PlanStrategy
+    strategy: PlanStrategy,
+    totalWeeks: number
   ): WorkoutSplit[] {
     const bodyPartSplits = [
       {
@@ -1211,11 +1285,16 @@ class WorkoutPlanGeneratorService {
       },
     ];
 
-    return bodyPartSplits.slice(0, sessionsPerWeek).map((split) => ({
-      ...split,
-      exerciseCount: strategy.sessionStructure.exercisesPerSession,
-      intensityLevel: strategy.intensityLevel.level,
-    }));
+    const totalSessions = sessionsPerWeek * totalWeeks;
+    const result = Array.from({ length: totalSessions }, (_, i) => {
+      const split = bodyPartSplits[i % bodyPartSplits.length];
+      return {
+        ...split,
+        exerciseCount: strategy.sessionStructure.exercisesPerSession,
+        intensityLevel: strategy.intensityLevel.level,
+      };
+    });
+    return result;
   }
 
   private async createPlanInDatabase(
@@ -1225,7 +1304,8 @@ class WorkoutPlanGeneratorService {
     workoutSplits: WorkoutSplit[],
     exercises: ExerciseWithScore[],
     endDate: dayjs.Dayjs,
-    suggestedWeeks: number
+    suggestedWeeks: number,
+    planStrategy: PlanStrategy
   ): Promise<Plan> {
     const client = await this.pool.connect();
 
@@ -1265,6 +1345,19 @@ class WorkoutPlanGeneratorService {
             workoutSplits: workoutSplits.map((s) => s.name),
             suggestedWeeks: suggestedWeeks,
             planDuration: `${suggestedWeeks} weeks`,
+            progressiveOverload: {
+              method: planStrategy.progressiveOverloadConfig.method,
+              phases: planStrategy.progressiveOverloadConfig.phases.map(
+                (p) => ({
+                  phase: p.phase,
+                  duration: p.duration,
+                  intensityMultiplier: p.intensityMultiplier,
+                  volumeMultiplier: p.volumeMultiplier,
+                })
+              ),
+              deloadFrequency:
+                planStrategy.progressiveOverloadConfig.deloadFrequency,
+            },
             titleGeneration: {
               aiGenerated: true,
               originalTemplate: aiGeneratedTitle.split(" (")[0], // Remove duration/frequency suffixes
@@ -1291,6 +1384,7 @@ class WorkoutPlanGeneratorService {
         title: plan.title,
         description: plan.description,
         totalWeeks: plan.cycle_weeks,
+        totalDays: plan.cycle_weeks * goal.sessionsPerWeek,
         createdAt: plan.created_at,
         endDate: plan.end_date,
         planDays: [], // Will be populated by generatePlanDays
@@ -1317,7 +1411,11 @@ class WorkoutPlanGeneratorService {
     try {
       await client.query("BEGIN");
 
-      for (let dayIndex = 0; dayIndex < goal.sessionsPerWeek; dayIndex++) {
+      for (
+        let dayIndex = 0;
+        dayIndex < goal.sessionsPerWeek * plan.totalWeeks;
+        dayIndex++
+      ) {
         const split = workoutSplits[dayIndex];
 
         // Insert plan_day
@@ -1507,13 +1605,49 @@ class WorkoutPlanGeneratorService {
       exercise.name.toLowerCase().includes("hold") ||
       exercise.exerciseCategory === "cardio";
 
+    const baseWeight = this.calculateWeight(exercise, userProfile, goal);
+
+    // Apply progressive overload if weekly progression is available
+    let finalSets = baseSets;
+    let finalReps = baseReps;
+    let finalWeight = baseWeight;
+    let rpe: number | undefined;
+
+    if (split.weeklyProgression) {
+      const progression = split.weeklyProgression;
+
+      // Apply volume progression
+      finalSets = Math.round(
+        baseSets * progression.volumeModifier + progression.setsAdjustment
+      );
+      finalSets = Math.max(1, Math.min(8, finalSets)); // Keep within reasonable bounds
+
+      if (!isDurationBased) {
+        finalReps = Math.round(baseReps + progression.repsAdjustment);
+        finalReps = Math.max(5, Math.min(30, finalReps)); // Keep within reasonable bounds
+      }
+
+      // Apply weight progression
+      if (exercise.equipment !== "body_weight" && baseWeight > 0) {
+        finalWeight = baseWeight + progression.weightIncrease;
+        finalWeight = Math.max(2.5, finalWeight); // Minimum weight
+      }
+
+      // Calculate RPE based on progressive overload
+      rpe = this.calculateRPEFromProgression(
+        userProfile.fitnessLevel,
+        goal.objectiveType,
+        progression
+      );
+    }
+
     return {
-      sets: baseSets,
-      reps: isDurationBased ? undefined : baseReps,
+      sets: finalSets,
+      reps: isDurationBased ? undefined : finalReps,
       duration: isDurationBased
         ? this.calculateDuration(exercise, userProfile.fitnessLevel)
         : undefined,
-      weight: this.calculateWeight(exercise, userProfile, goal),
+      weight: finalWeight,
       restTime: this.calculateRestTime(
         exercise,
         goal.objectiveType,
@@ -1524,7 +1658,67 @@ class WorkoutPlanGeneratorService {
         goal.objectiveType,
         exercise
       ),
+      rpe,
+      progressiveOverload: split.weeklyProgression
+        ? {
+            baseSets,
+            baseReps: isDurationBased ? undefined : baseReps,
+            baseWeight,
+            weeklyProgression: {
+              setsIncrease: split.weeklyProgression.setsAdjustment,
+              repsAdjustment: split.weeklyProgression.repsAdjustment,
+              weightIncrease: split.weeklyProgression.weightIncrease,
+            },
+          }
+        : undefined,
     };
+  }
+
+  private calculateRPEFromProgression(
+    fitnessLevel: FitnessLevel,
+    objective: Objective,
+    progression: WeeklyProgression
+  ): number {
+    let baseRPE = 6; // Default moderate RPE
+
+    // Adjust base RPE based on fitness level
+    switch (fitnessLevel) {
+      case FitnessLevel.BEGINNER:
+        baseRPE = 6;
+        break;
+      case FitnessLevel.INTERMEDIATE:
+        baseRPE = 7;
+        break;
+      case FitnessLevel.ADVANCED:
+        baseRPE = 8;
+        break;
+    }
+
+    // Adjust based on phase
+    switch (progression.phase) {
+      case "foundation":
+        baseRPE -= 0.5;
+        break;
+      case "build":
+        baseRPE += 0;
+        break;
+      case "peak":
+        baseRPE += 1;
+        break;
+      case "deload":
+        baseRPE -= 1.5;
+        break;
+    }
+
+    // Adjust based on objective
+    if (objective === Objective.ENDURANCE) {
+      baseRPE -= 0.5; // Lower RPE for endurance
+    } else if (objective === Objective.GAIN_MUSCLE) {
+      baseRPE += 0.5; // Higher RPE for muscle gain
+    }
+
+    // Ensure RPE is within valid range (5-10)
+    return Math.max(5, Math.min(10, Math.round(baseRPE * 10) / 10));
   }
 
   private calculateDuration(exercise: Exercise, level: FitnessLevel): number {
@@ -2129,6 +2323,89 @@ class WorkoutPlanGeneratorService {
       baseWeeks,
       adjustments,
       finalWeeks,
+      explanation,
+    };
+  }
+
+  /**
+   * Demo function to show how progressive overload works
+   * This can be used for testing and demonstration purposes
+   */
+  public demonstrateProgressiveOverload(
+    fitnessLevel: string,
+    objective: string,
+    totalWeeks: number
+  ): {
+    config: ProgressiveOverloadConfig;
+    weeklyProgressions: WeeklyProgression[];
+    explanation: string;
+  } {
+    const config = ProgressiveOverloadCalculator.createDefaultConfig(
+      fitnessLevel as FitnessLevel,
+      objective as Objective,
+      totalWeeks
+    );
+
+    const weeklyProgressions: WeeklyProgression[] = [];
+
+    for (let week = 1; week <= totalWeeks; week++) {
+      const progression =
+        ProgressiveOverloadCalculator.calculateWeeklyProgression(
+          config,
+          week,
+          totalWeeks
+        );
+      weeklyProgressions.push(progression);
+    }
+
+    let explanation = `Progressive Overload Configuration for ${fitnessLevel} ${objective}:\n`;
+    explanation += `Method: ${config.method}\n`;
+    explanation += `Deload Frequency: Every ${config.deloadFrequency} weeks\n\n`;
+
+    explanation += "Phases:\n";
+    config.phases.forEach((phase, index) => {
+      explanation += `${index + 1}. ${phase.phase.toUpperCase()} (${
+        phase.duration
+      } weeks)\n`;
+      explanation += `   - Intensity: ${(
+        phase.intensityMultiplier * 100
+      ).toFixed(0)}%\n`;
+      explanation += `   - Volume: ${(phase.volumeMultiplier * 100).toFixed(
+        0
+      )}%\n`;
+      explanation += `   - Weight increase: ${phase.weightIncrease}kg/week\n`;
+      explanation += `   - Reps adjustment: ${
+        phase.repsAdjustment > 0 ? "+" : ""
+      }${phase.repsAdjustment}\n`;
+      explanation += `   - Sets adjustment: ${
+        phase.setsAdjustment > 0 ? "+" : ""
+      }${phase.setsAdjustment}\n\n`;
+    });
+
+    explanation += "Weekly Progression Summary:\n";
+    const phaseSummary = weeklyProgressions.reduce((acc, progression) => {
+      const phase = progression.phase;
+      if (!acc[phase]) {
+        acc[phase] = { weeks: 0, deloadWeeks: 0 };
+      }
+      acc[phase].weeks++;
+      if (progression.isDeloadWeek) {
+        acc[phase].deloadWeeks++;
+      }
+      return acc;
+    }, {} as Record<string, { weeks: number; deloadWeeks: number }>);
+
+    Object.entries(phaseSummary).forEach(([phase, summary]) => {
+      explanation += `${phase.toUpperCase()}: ${summary.weeks} weeks`;
+      if (summary.deloadWeeks > 0) {
+        explanation += ` (${summary.deloadWeeks} deload weeks)`;
+      }
+      explanation += "\n";
+    });
+
+    return {
+      config,
+      weeklyProgressions,
       explanation,
     };
   }
