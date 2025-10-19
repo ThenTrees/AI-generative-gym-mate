@@ -1,7 +1,7 @@
-import { HealthConsideration } from "./HealthConsideration";
-import { IntensityLevel } from "./IntensityLevel";
-import { SessionStructure } from "./SessionStructure";
-import { VolumeTargets } from "./VolumeTargets";
+import { HealthConsideration } from "./healthConsideration";
+import { IntensityLevel } from "./intensityLevel";
+import { SessionStructure } from "./sessionStructure";
+import { VolumeTargets } from "./volumeTargets";
 
 export interface PlanStrategy {
   primaryObjective: string;

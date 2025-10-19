@@ -1,4 +1,4 @@
-import { RestPeriods } from "./RestPeriods";
+import { RestPeriods } from "./restPeriods";
 
 export interface IntensityLevel {
   level: number; // 1-10

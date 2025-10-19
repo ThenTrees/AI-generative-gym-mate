@@ -1,18 +1,7 @@
 import { Gender, Objective } from "../common/common-enum";
+import { Goal } from "../types/model/goal.model";
+import { UserProfile } from "../types/model/userProfile.model";
 import { NUTRITION_CONSTANTS } from "../utils/nutritionConstants";
-
-export interface UserProfile {
-  gender: Gender;
-  weightKg: number;
-  heightCm: number;
-  age: number;
-}
-
-export interface Goal {
-  id: string;
-  objectiveType: Objective;
-  sessionsPerWeek: number;
-}
 
 export interface NutritionTarget {
   bmr: number;
@@ -44,12 +33,12 @@ export class NutritionCalculationService {
    * Calculate BMR using Mifflin-St Jeor equation
    */
   calculateBMR(profile: UserProfile): number {
-    const { gender, weightKg, heightCm, age } = profile;
+    const { gender, weight, height, age } = profile;
 
     if (gender === Gender.MALE) {
-      return 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
+      return 10 * weight + 6.25 * height - 5 * age + 5;
     } else {
-      return 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
+      return 10 * weight + 6.25 * height - 5 * age - 161;
     }
   }
 
