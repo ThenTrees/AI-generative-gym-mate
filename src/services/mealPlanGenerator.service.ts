@@ -779,7 +779,8 @@ export class MealPlanGenerator {
   async getGoalByUser(userId: string) {
     const goalResult = await this.pool.query(
       `
-      SELECT id, objective as "objectiveType", sessions_per_week as "sessionsPerWeek"
+      SELECT id, objective as "objectiveType", sessions_per_week as "sessionsPerWeek",
+      session_minutes as "sessionMinutes"
       FROM goals
       WHERE user_id = $1 AND status = 'ACTIVE' AND is_deleted = false
       ORDER BY created_at DESC

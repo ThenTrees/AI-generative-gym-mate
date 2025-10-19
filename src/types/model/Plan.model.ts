@@ -7,7 +7,8 @@ export interface Plan {
   title: string;
   description?: string;
   planDays: PlanDay[];
-  totalWeeks: number; // tổng số tuần
+  totalWeeks: number;
+  totalDays: number;
   createdAt: string;
   endDate: string;
   aiMetadata?: Record<string, any>;

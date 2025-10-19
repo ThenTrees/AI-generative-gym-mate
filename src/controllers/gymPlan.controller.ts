@@ -39,7 +39,7 @@ class GymPlanController {
       );
 
       new SuccessResponse({
-        message: `Successfully generated ${workoutPlan.planDays.length}-day workout plan`,
+        message: `Successfully generated ${workoutPlan.planDays.length} - day workout plan`,
         statusCode: 201,
         metadata: {
           workoutPlan: workoutPlan,

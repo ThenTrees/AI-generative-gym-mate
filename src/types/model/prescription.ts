@@ -7,4 +7,15 @@ export interface Prescription {
   restTime: number; // seconds
   duration?: number;
   intensity?: Intensity;
+  rpe?: number; // Rate of Perceived Exertion (1-10)
+  progressiveOverload?: {
+    baseSets: number;
+    baseReps?: number;
+    baseWeight?: number;
+    weeklyProgression: {
+      setsIncrease: number;
+      repsAdjustment: number;
+      weightIncrease: number;
+    };
+  };
 }
