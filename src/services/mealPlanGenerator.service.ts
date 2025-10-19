@@ -5,19 +5,19 @@ import { Objective } from "../common/common-enum";
 import { MealPlan } from "../types/model/mealPlan";
 import { FoodRecommendation } from "../types/model/foodRecommendation";
 import { convertDateFormat } from "../utils/convert";
+import { logger } from "../utils/logger";
+import { foodVectorService } from "./foodVector.service";
+import { Food } from "../types/model/food";
 import {
   NutritionCalculationService,
-  UserProfile,
-  Goal,
   NutritionTarget as CalculatedNutritionTarget,
-} from "./NutritionCalculation.service";
+} from "./nutritionCalculation.service";
 import {
-  MealRecommendationService,
   MealContext,
-} from "./MealRecommendation.service";
-import { logger } from "../utils/logger";
-import { foodVectorService } from "./FoodVector.service";
-import { Food } from "../types/model/food";
+  MealRecommendationService,
+} from "./mealRecommendation.service";
+import { UserProfile } from "../types/model/userProfile.model";
+import { Goal } from "../types/model/goal.model";
 types.setTypeParser(1082, (val) => val);
 export class MealPlanGenerator {
   private pool: Pool;

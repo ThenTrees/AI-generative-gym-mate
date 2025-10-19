@@ -1,7 +1,7 @@
 import { logger } from "./utils/logger";
 import { pgVectorService } from "./services/pgVector.service";
 import * as cron from "node-cron";
-import { foodVectorService } from "./services/FoodVector.service";
+import { foodVectorService } from "./services/foodVector.service";
 
 class RAGApplication {
   async initialize() {

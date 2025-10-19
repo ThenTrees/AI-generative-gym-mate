@@ -1,5 +1,5 @@
 import { Objective } from "../common/common-enum";
-import { FoodVectorService } from "./FoodVector.service";
+import { FoodVectorService } from "./foodVector.service";
 import { PgVectorService } from "./pgVector.service";
 import {
   NUTRITION_CONSTANTS,

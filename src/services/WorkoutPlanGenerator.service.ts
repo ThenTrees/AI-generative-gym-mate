@@ -7,7 +7,7 @@ import { PgVectorService } from "./pgVector.service";
 import { DATABASE_CONFIG } from "../configs/database";
 import { logger } from "../utils/logger";
 import { PlanRequest } from "../types/request/planRequest";
-import { Plan } from "../types/model/Plan.model";
+import { Plan } from "../types/model/plan.model";
 import { Goal } from "../types/model/goal.model";
 import { UserProfile } from "../types/model/userProfile.model";
 import {
@@ -16,19 +16,19 @@ import {
   Intensity,
   Objective,
 } from "../common/common-enum";
-import { ExerciseWithScore } from "../types/model/ExerciseWithScore";
+import { ExerciseWithScore } from "../types/model/exerciseWithScore";
 import { Exercise } from "../types/model/exercise.model";
 import { PlanDay } from "../types/model/planDay.model";
 import { PlanItem } from "../types/model/planItem.model";
 import { Prescription } from "../types/model/prescription";
-import { PlanStrategy } from "../types/model/PlanStrategy";
-import { IntensityLevel } from "../types/model/IntensityLevel";
-import { WorkoutSplit } from "../types/model/WorkoutSplit";
-import { SessionStructure } from "../types/model/SessionStructure";
-import { HealthConsideration } from "../types/model/HealthConsideration";
-import { VolumeTargets } from "../types/model/VolumeTargets";
-import { RestPeriods } from "../types/model/RestPeriods";
-import { SearchQuery } from "../types/model/SearchQuery";
+import { PlanStrategy } from "../types/model/planStrategy";
+import { IntensityLevel } from "../types/model/intensityLevel";
+import { WorkoutSplit } from "../types/model/workoutSplit";
+import { SessionStructure } from "../types/model/sessionStructure";
+import { HealthConsideration } from "../types/model/healthConsideration";
+import { VolumeTargets } from "../types/model/volumeTargets";
+import { RestPeriods } from "../types/model/restPeriods";
+import { SearchQuery } from "../types/model/searchQuery";
 import { WorkoutCalculator } from "../utils/calculators";
 import { WORKOUT_CONSTANTS } from "../utils/constants";
 import dayjs from "dayjs";
