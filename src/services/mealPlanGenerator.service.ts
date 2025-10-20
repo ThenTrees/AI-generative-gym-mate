@@ -11,11 +11,11 @@ import { Food } from "../types/model/food";
 import {
   NutritionCalculationService,
   NutritionTarget as CalculatedNutritionTarget,
-} from "./nutritionCalculation.service";
+} from "./NutritionCalculation.service";
 import {
   MealContext,
   MealRecommendationService,
-} from "./mealRecommendation.service";
+} from "./MealRecommendation.service";
 import { UserProfile } from "../types/model/userProfile.model";
 import { Goal } from "../types/model/goal.model";
 types.setTypeParser(1082, (val) => val);
@@ -199,7 +199,6 @@ export class MealPlanGenerator {
       isTrainingDay,
       workoutCalories
     );
-
     logger.info("🎯 Nutrition targets:");
     logger.info(`BMR: ${nutritionTarget.bmr} kcal`);
     logger.info(`TDEE: ${nutritionTarget.tdee} kcal`);
@@ -763,8 +762,8 @@ export class MealPlanGenerator {
         up.user_id as "userId",
         up.full_name as "fullName",
         up.gender,
-        up.height_cm as "heightCm",
-        up.weight_kg as "weightKg",
+        up.height_cm as "height",
+        up.weight_kg as "weight",
         up.bmi,
         up.fitness_level as "fitnessLevel",
         up.age
