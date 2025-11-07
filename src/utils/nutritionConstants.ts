@@ -31,7 +31,7 @@ export const NUTRITION_CONSTANTS = {
 
   // Search limits
   DEFAULT_SEARCH_LIMIT: 30,
-  MAX_RECOMMENDATIONS: 5,
+  MAX_RECOMMENDATIONS: 6, // ✅ Tăng từ 5 lên 6 để có nhiều options hơn
 
   // Macro ratios by objective
   MACRO_RATIOS: {

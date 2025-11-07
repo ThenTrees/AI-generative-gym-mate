@@ -22,6 +22,10 @@ export interface ChatResponse {
   exercises?: ExerciseCard[];
   hasExercises?: boolean;
   exerciseType?: string | null;
+  foods?: FoodCard[];
+  hasFoods?: boolean;
+  foodCategory?: string | null;
+  mealTime?: string | null;
 }
 
 export interface ExerciseCard {
@@ -44,6 +48,28 @@ export interface ConversationMessage {
   timestamp: string;
   exercises?: ExerciseCard[];
   hasExercises?: boolean;
+  foods?: FoodCard[];
+  hasFoods?: boolean;
+}
+
+export interface FoodCard {
+  id: string;
+  name: string;
+  nameVi?: string;
+  nameEn?: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  fiber?: number;
+  category?: string;
+  mealTime?: string;
+  description?: string;
+  benefits?: string;
+  preparationTips?: string;
+  commonCombinations?: string;
+  imageUrl?: string;
+  similarity?: number;
 }
 
 export interface ExerciseAnalysis {

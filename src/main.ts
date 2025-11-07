@@ -2,6 +2,7 @@ import { logger } from "./utils/logger";
 import { pgVectorService } from "./services/pgVector.service";
 import * as cron from "node-cron";
 import { foodVectorService } from "./services/foodVector.service";
+import { knowledgeVectorService } from "./services/knowledgeVector.service";
 
 class RAGApplication {
   async initialize() {
@@ -11,10 +12,26 @@ class RAGApplication {
       await pgVectorService.initialize();
       await foodVectorService.initialize();
 
+      // ✅ NEW: Initialize knowledge embeddings
+      try {
+        const stats = await knowledgeVectorService.getEmbeddingStats();
+        if (stats.total === 0) {
+          logger.info("No knowledge embeddings found, loading knowledge base...");
+          await knowledgeVectorService.loadAndStoreKnowledge();
+        } else {
+          logger.info(`Found ${stats.total} existing knowledge embeddings`);
+        }
+      } catch (e) {
+        logger.warn("Knowledge embeddings initialization failed:", e);
+        logger.warn("Continuing without knowledge embeddings (will use fallback)");
+      }
+
       // Optional: refresh embeddings on startup
       try {
         if (process.env.RUN_BATCH === "true") {
           await pgVectorService.refreshEmbeddings();
+          // Also refresh knowledge embeddings
+          await knowledgeVectorService.loadAndStoreKnowledge();
         }
       } catch (e) {
         logger.warn("Startup embedding refresh failed, continuing to serve.");
@@ -31,6 +48,17 @@ class RAGApplication {
           logger.info("Cron: embeddings refreshed successfully");
         } catch (err) {
           logger.error("Cron: failed to refresh embeddings", err);
+        }
+      });
+
+      // ✅ NEW: Cron to refresh knowledge embeddings daily at 3 AM
+      cron.schedule("0 3 * * *", async () => {
+        logger.info("Cron: refreshing knowledge embeddings...");
+        try {
+          await knowledgeVectorService.loadAndStoreKnowledge();
+          logger.info("Cron: knowledge embeddings refreshed successfully");
+        } catch (err) {
+          logger.error("Cron: failed to refresh knowledge embeddings", err);
         }
       });
 
