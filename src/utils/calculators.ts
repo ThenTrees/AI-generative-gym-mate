@@ -33,7 +33,7 @@ export class WorkoutCalculator {
 
     // Adjust for exercise type
     if (
-      exercise.exerciseCategory === "strength" &&
+      exercise.exerciseCategory.code === "strength" &&
       exercise.name.toLowerCase().includes("deadlift")
     ) {
       baseReps = Math.max(5, baseReps - 5); // Heavy compounds lower reps

@@ -217,7 +217,6 @@ export class FoodVectorService {
             f.calories, f.protein, f.carbs, f.fat, f.fiber,
             f.category, f.meal_time as "mealTime",
             f.description, f.detailed_benefits as "detailedBenefits",
-            f.preparation_tips as "preparationTips",
             f.common_combinations as "commonCombinations",
             f.image_url as "imageUrl",
             1 - (fe.embedding <=> $1::vector) AS similarity

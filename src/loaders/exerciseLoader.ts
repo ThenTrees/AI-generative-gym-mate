@@ -123,19 +123,19 @@ export class ExerciseLoader {
     // tags.push(exercise.secondaryMuscles.toString().toLowerCase());
 
     // Equipment-based tags
-    if (exercise.equipment === "body_weight") {
+    if (exercise.equipment.code === "body_weight") {
       tags.push("no equipment", "home workout", "calisthenics", "bodyweight");
-    } else if (exercise.equipment.includes("dumbbell")) {
+    } else if (exercise.equipment.name.includes("dumbbell")) {
       tags.push("free weights", "dumbbells", "unilateral");
-    } else if (exercise.equipment.includes("barbell")) {
+    } else if (exercise.equipment.name.includes("barbell")) {
       tags.push("barbell", "heavy weights", "bilateral");
-    } else if (exercise.equipment.includes("machine")) {
+    } else if (exercise.equipment.name.includes("machine")) {
       tags.push("gym machine", "assisted", "guided movement");
-    } else if (exercise.equipment.includes("cable")) {
+    } else if (exercise.equipment.name.includes("cable")) {
       tags.push("cable machine", "variable resistance");
-    } else if (exercise.equipment.includes("kettlebell")) {
+    } else if (exercise.equipment.name.includes("kettlebell")) {
       tags.push("kettlebell", "functional", "dynamic");
-    } else if (exercise.equipment.includes("kettlebell")) {
+    } else if (exercise.equipment.name.includes("kettlebell")) {
       tags.push("kettlebell", "functional", "dynamic");
     }
 
@@ -182,15 +182,15 @@ export class ExerciseLoader {
     }
 
     // Category-based tags
-    if (exercise.exerciseCategory === "cardio") {
+    if (exercise.exerciseCategory.code === "cardio") {
       tags.push("cardiovascular", "endurance", "fat burning", "aerobic");
     }
-    if (exercise.exerciseCategory === "strength") {
+    if (exercise.exerciseCategory.code === "strength") {
       tags.push("strength training", "muscle building");
     }
     if (
-      exercise.exerciseCategory === "stretching" ||
-      exercise.exerciseCategory === "stretch"
+      exercise.exerciseCategory.code === "stretching" ||
+      exercise.exerciseCategory.code === "stretch"
     ) {
       tags.push("flexibility", "mobility", "recovery");
     }

@@ -1,12 +1,16 @@
+import { Equipment } from "./equipment.model";
+import { ExerciseCategory } from "./exerciseCategory.model";
+import { Muscle } from "./muscle.model";
+
 export interface Exercise {
   id: string;
   slug: string;
   name: string;
-  primaryMuscle: string[];
-  secondaryMuscles: string[];
-  equipment: string;
+  primaryMuscle: Muscle;
+  secondaryMuscles: Muscle[];
+  equipment: Equipment;
   bodyPart: string;
-  exerciseCategory: string;
+  exerciseCategory: ExerciseCategory;
   difficultyLevel: number; // or 1-5
   instructions?: string[];
   safetyNotes?: string;

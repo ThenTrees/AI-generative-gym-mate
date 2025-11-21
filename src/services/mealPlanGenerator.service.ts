@@ -11,7 +11,8 @@ import { Food } from "../types/model/food";
 import {
   NutritionCalculationService,
   NutritionTarget as CalculatedNutritionTarget,
-} from "./NutritionCalculation.service";
+  MealNutrition,
+} from "./nutritionCalculation.service";
 import {
   MealContext,
   MealRecommendationService,
@@ -230,7 +231,6 @@ export class MealPlanGenerator {
           caloriesForBreakfast: nutritionTarget.caloriesForBreakfast,
           caloriesForLunch: nutritionTarget.caloriesForLunch,
           caloriesForDinner: nutritionTarget.caloriesForDiner,
-          isTrainingDay: nutritionTarget.isTraining,
         },
       };
     } else {
@@ -278,7 +278,7 @@ export class MealPlanGenerator {
 
       return {
         mealPlanId: mealPlanId,
-        planDate: planDate,
+        planDate: planDateTransfer,
         isTrainingDay,
         meals,
         actualNutrition: {
@@ -292,6 +292,9 @@ export class MealPlanGenerator {
           protein: nutritionTarget.macros.proteinG,
           carbs: nutritionTarget.macros.carbsG,
           fat: nutritionTarget.macros.fatG,
+          caloriesForBreakfast: nutritionTarget.caloriesForBreakfast,
+          caloriesForLunch: nutritionTarget.caloriesForLunch,
+          caloriesForDinner: nutritionTarget.caloriesForDiner,
         },
       };
     }
@@ -490,7 +493,10 @@ export class MealPlanGenerator {
 
     const mealTimes = await this.getMealTimes();
 
-    const allMealNutritions = [];
+    const allMealNutritions: Array<{
+      mealTime: string;
+      nutrition: MealNutrition;
+    }> = [];
     for (const mealTime of mealTimes) {
       const mealNutrition =
         this.nutritionCalculationService.calculateMealNutrition(
@@ -503,6 +509,32 @@ export class MealPlanGenerator {
         nutrition: mealNutrition,
       });
     }
+    const mealNutritionMap = allMealNutritions.reduce<
+      Record<string, MealNutrition>
+    >((acc, entry) => {
+      acc[entry.mealTime] = entry.nutrition;
+      return acc;
+    }, {});
+    const orderedMealCodes = mealTimes.map((mealTime) => mealTime.code);
+    const getMealCalories = (
+      preferredCodes: string[],
+      fallbackIndex: number
+    ) => {
+      for (const code of preferredCodes) {
+        if (mealNutritionMap[code]) {
+          return mealNutritionMap[code].calories;
+        }
+      }
+      const fallbackCode = orderedMealCodes[fallbackIndex];
+      if (fallbackCode && mealNutritionMap[fallbackCode]) {
+        return mealNutritionMap[fallbackCode].calories;
+      }
+      return 0;
+    };
+
+    const caloriesForBreakfast = getMealCalories(["BREAKFAST"], 0);
+    const caloriesForLunch = getMealCalories(["LUNCH"], 1);
+    const caloriesForDinner = getMealCalories(["DINNER"], 2);
     // Save to database
     await this.saveNutritionTarget(
       userId,
@@ -514,13 +546,19 @@ export class MealPlanGenerator {
       nutritionTarget.bmr,
       nutritionTarget.tdee,
       goal.objectiveType,
-      allMealNutritions[0].nutrition.calories,
-      allMealNutritions[1].nutrition.calories,
-      allMealNutritions[2].nutrition.calories,
+      caloriesForBreakfast,
+      caloriesForLunch,
+      caloriesForDinner,
       isTrainingDay
     );
 
-    return nutritionTarget;
+    return {
+      ...nutritionTarget,
+      caloriesForBreakfast,
+      caloriesForLunch,
+      caloriesForDiner: caloriesForDinner,
+      isTraining: isTrainingDay,
+    };
   }
 
   private async saveMealPlan(
@@ -618,7 +656,7 @@ export class MealPlanGenerator {
       // Insert meal plan
       const nutritionQuery = `
         INSERT INTO nutrition_targets (
-          user_id, goal_id, calories_kcal, protein_g, fat_g, carbs_g,
+          user_id, goal_id, calories_kcal, protein_g, carbs_g, fat_g,
           bmr, tdee, goal_type, is_active, suggestion_calories_for_breakfast, suggestion_calories_for_lunch, suggestion_calories_for_dinner, is_training
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'true', $10, $11, $12, $13)
         RETURNING id
@@ -629,8 +667,8 @@ export class MealPlanGenerator {
         goalId,
         calories,
         protein,
-        fat,
         carbs,
+        fat,
         bmr,
         tdee,
         goalType,
@@ -688,21 +726,27 @@ export class MealPlanGenerator {
       `
       SELECT
         mp.id as "mealPlanId",
-        mp.user_id as "userId",
         mp.plan_date as "planDate",
+        mp.base_calories as "baseCalories",
+        mp.is_training_day as "isTrainingDay",
         mp.total_calories as "totalCalories",
         mp.total_protein as "totalProtein",
         mp.total_carbs as "totalCarbs",
         mp.total_fat as "totalFat",
-        mp.is_training_day as "isTrainingDay",
-        mp.base_calories as "baseCalories",
         mpi.display_order as "displayOrder",
         mpi.id as "mealPlanItemId",
         mpi.meal_time_id as "mealTimeId",
         mpi.servings as "servings",
         mpi.is_completed as "completed",
+        mpi.calories as "itemCalories",
+        mpi.protein as "itemProtein",
+        mpi.carbs as "itemCarbs",
+        mpi.fat as "itemFat",
+        f.id as "foodId",
         f.food_name as "foodName",
         f.food_name_vi as "foodNameVi",
+        f.description as "description",
+        f.common_combinations as "commonCombinations",
         f.calories as "foodCalories",
         f.protein as "foodProtein",
         f.carbs as "foodCarbs",
@@ -729,22 +773,50 @@ export class MealPlanGenerator {
     const mealPlanDate = resultMealPlan[0].planDate;
     const isTrainingDay = resultMealPlan[0].isTrainingDay;
     const actualNutrition = {
-      calories: resultMealPlan[0].totalCalories,
-      protein: resultMealPlan[0].totalProtein,
-      carbs: resultMealPlan[0].totalCarbs,
-      fat: resultMealPlan[0].totalFat,
+      calories: resultMealPlan[0].totalCalories || 0,
+      protein: resultMealPlan[0].totalProtein || 0,
+      carbs: resultMealPlan[0].totalCarbs || 0,
+      fat: resultMealPlan[0].totalFat || 0,
     };
 
-    const meals: any = {};
-
-    const groupedMeals = resultMealPlan.reduce((acc, meal) => {
-      const key = meal.mealTimeCode;
-      if (!acc[key]) {
-        acc[key] = [];
-      }
-      acc[key].push(meal);
-      return acc;
-    }, {} as Record<string, typeof meals>);
+    const groupedMeals = resultMealPlan.reduce<Record<string, any[]>>(
+      (acc, meal) => {
+        const key = meal.mealTimeCode;
+        if (!acc[key]) {
+          acc[key] = [];
+        }
+        acc[key].push({
+          mealPlanItemId: meal.mealPlanItemId,
+          mealTimeId: meal.mealTimeId,
+          servings: meal.servings,
+          completed: meal.completed,
+          displayOrder: meal.displayOrder,
+          nutrition: {
+            calories: meal.itemCalories,
+            protein: meal.itemProtein,
+            carbs: meal.itemCarbs,
+            fat: meal.itemFat,
+          },
+          food: {
+            id: meal.foodId,
+            name: meal.foodName,
+            nameVi: meal.foodNameVi,
+            description: meal.description,
+            commonCombinations: meal.commonCombinations,
+            calories: meal.foodCalories,
+            protein: meal.foodProtein,
+            carbs: meal.foodCarbs,
+            fat: meal.foodFat,
+            fiber: meal.foodFiber,
+            category: meal.category,
+            image: meal.foodImage,
+            benefits: meal.foodBenefits,
+          },
+        });
+        return acc;
+      },
+      {}
+    );
 
     return {
       mealPlanId,
@@ -891,7 +963,9 @@ export class MealPlanGenerator {
         foodId,
       ]);
       return result.rows.length > 0;
-    } catch (error) {
+    } catch (error: any) {
+      logger.error("check meal plan exist failed!: ", error.message);
+      throw error;
     } finally {
       client.release();
     }

@@ -81,7 +81,6 @@ export class MealRecommendationService {
       return {
         ...food,
         score,
-        reason: `Phù hợp cho ${context.mealTime.nameVi}`,
         servingSuggestion,
         targetCalories: maxCalories,
       };

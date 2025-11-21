@@ -25,5 +25,5 @@ ragApp.initialize().then(() => {
   logger.info("RAG Application initialized");
 });
 
-const port = Number(process.env.PORT || 3000);
+const port = Number(process.env.PORT || 8081);
 app.listen(port, () => logger.info(port.toString(), "RAG service started"));

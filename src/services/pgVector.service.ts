@@ -318,10 +318,17 @@ export class PgVectorService {
         id: row.id,
         slug: row.slug,
         name: row.name,
-        primaryMuscle: row.primary_muscle,
-        equipment: row.equipment,
+        primaryMuscle: {
+          code: row.primary_muscle,
+        },
+        equipment: {
+          code: row.equipment,
+          name: row.equipment_name,
+        },
         bodyPart: row.body_part,
-        exerciseCategory: row.exercise_category,
+        exerciseCategory: {
+          code: row.exercise_category,
+        },
         difficultyLevel: row.difficulty_level,
         instructions: row.instructions,
         safetyNotes: row.safety_notes,
@@ -329,7 +336,7 @@ export class PgVectorService {
         benefits: row.benefits,
         tags: row.tags || [],
         alternativeNames: row.alternative_names || [], // TODO:
-        secondaryMuscles: row.alternative_names || [], // TODO:
+        secondaryMuscles: row.secondary_muscles || [], // TODO:
       }));
     } finally {
       client.release();

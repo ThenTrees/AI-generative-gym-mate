@@ -994,21 +994,21 @@ class WorkoutPlanGeneratorService {
   ): boolean {
     if (
       preferences.includes("bodyweight") &&
-      exercise.equipment === "body_weight"
+      exercise.equipment.code === "body_weight"
     ) {
       return true;
     }
     if (
       preferences.includes("home_workout") &&
       ["body_weight", "dumbbell", "resistance_band"].includes(
-        exercise.equipment
+        exercise.equipment.code
       )
     ) {
       return true;
     }
     if (
       preferences.includes("gym") &&
-      !["body_weight"].includes(exercise.equipment)
+      !["body_weight"].includes(exercise.equipment.code)
     ) {
       return true;
     }
@@ -1478,7 +1478,7 @@ class WorkoutPlanGeneratorService {
             exercise: exerciseData.exercise,
             itemIndex: itemIndex + 1,
             prescription,
-            note: this.generateExerciseNote(exerciseData.exercise, profile),
+            notes: this.generateExerciseNote(exerciseData.exercise, profile),
             // similarityScore: exerciseData.similarityScore,
           });
         }
@@ -1603,7 +1603,7 @@ class WorkoutPlanGeneratorService {
     const isDurationBased =
       exercise.name.toLowerCase().includes("plank") ||
       exercise.name.toLowerCase().includes("hold") ||
-      exercise.exerciseCategory === "cardio";
+      exercise.exerciseCategory.code === "cardio";
 
     const baseWeight = this.calculateWeight(exercise, userProfile, goal);
 
@@ -1628,7 +1628,7 @@ class WorkoutPlanGeneratorService {
       }
 
       // Apply weight progression
-      if (exercise.equipment !== "body_weight" && baseWeight > 0) {
+      if (exercise.equipment.code !== "body_weight" && baseWeight > 0) {
         finalWeight = baseWeight + progression.weightIncrease;
         finalWeight = Math.max(2.5, finalWeight); // Minimum weight
       }
@@ -1733,7 +1733,7 @@ class WorkoutPlanGeneratorService {
     // Exercise-specific adjustments
     if (exercise.name.toLowerCase().includes("plank")) {
       return duration;
-    } else if (exercise.exerciseCategory === "cardio") {
+    } else if (exercise.exerciseCategory.code === "cardio") {
       return duration * 8; // 4-8 minutes for cardio
     }
 
@@ -1752,7 +1752,7 @@ class WorkoutPlanGeneratorService {
     userProfile: UserProfile,
     goal: Goal
   ): number {
-    if (exercise.equipment === "body_weight") {
+    if (exercise.equipment.code === "body_weight") {
       return 0;
     }
 
