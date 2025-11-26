@@ -3,6 +3,11 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { logger } from '../utils/logger';
 import knowledgeBase from './knowledgeBase.service';
 import { PgVectorService } from './pgVector.service';
+import { knowledgeVectorService } from './knowledgeVector.service';
+import { foodVectorService } from './foodVector.service';
+import { NutritionCalculationService } from './NutritionCalculation.service';
+import { Objective } from '../common/common-enum';
+import { NUTRITION_CONSTANTS } from '../utils/nutritionConstants';
 import { v4 as uuidv4 } from 'uuid';
 import { 
   ChatMessage, 
@@ -10,17 +15,21 @@ import {
   ChatContext, 
   ExerciseCard, 
   ConversationMessage,
-  ExerciseAnalysis 
+  ExerciseAnalysis,
+  FoodCard
 } from '../types/model/chatbot.model';
 
 class ChatbotService {
   private openai: OpenAI | null = null;
   private gemini: GoogleGenerativeAI | null = null;
   private pgVector: PgVectorService;
+  private nutritionCalculator: NutritionCalculationService;
   private conversations: Map<string, ConversationMessage[]> = new Map();
+  private translationCache: Map<string, string> = new Map();
 
   constructor() {
     this.pgVector = new PgVectorService();
+    this.nutritionCalculator = new NutritionCalculationService();
     this.initializeAI();
   }
 
@@ -82,15 +91,21 @@ class ChatbotService {
         logger.info(`Exercise query detected! Found ${exerciseAnalysis.exercises.length} relevant exercises`);
       }
 
+      // ✅ NEW: Analyze nutrition intent and search for relevant foods
+      const nutritionAnalysis = await this.analyzeNutritionIntent(message, context?.userProfile, context?.fitnessGoals);
+      if (nutritionAnalysis?.isNutritionQuery) {
+        logger.info(`Nutrition query detected! Found ${nutritionAnalysis.foods.length} relevant foods`);
+      }
+
       // Build AI context
       const aiContext = await this.buildAIContext({
         message,
         userProfile: context?.userProfile,
         conversationHistory: conversationHistory.slice(-5),
         intent,
-        knowledgeBase: knowledgeBase.getRelevantKnowledge(message, intent),
         userId,
-        exerciseAnalysis
+        exerciseAnalysis,
+        nutritionAnalysis
       });
 
       // Generate AI response
@@ -137,6 +152,37 @@ class ChatbotService {
         logger.info(`⚠️ No exercises added - isExerciseQuery: ${exerciseAnalysis?.isExerciseQuery}, count: ${exerciseAnalysis?.exercises?.length || 0}`);
       }
 
+      // ✅ NEW: Add food data to response if available
+      if (nutritionAnalysis?.isNutritionQuery && nutritionAnalysis.foods.length > 0) {
+        response.foods = nutritionAnalysis.foods.map((food: any) => ({
+          id: food.id,
+          name: food.name,
+          nameVi: food.nameVi,
+          nameEn: food.nameEn,
+          calories: food.calories,
+          protein: food.protein,
+          carbs: food.carbs,
+          fat: food.fat,
+          fiber: food.fiber,
+          category: food.category,
+          mealTime: food.mealTime,
+          description: food.description,
+          benefits: food.benefits,
+          preparationTips: food.preparationTips,
+          commonCombinations: food.commonCombinations,
+          imageUrl: food.imageUrl,
+          similarity: food.similarity
+        }));
+        response.hasFoods = true;
+        response.foodCategory = nutritionAnalysis.category;
+        response.mealTime = nutritionAnalysis.mealTime;
+        
+        logger.info(`✅ Added ${response.foods.length} structured foods to response`);
+        logger.info(`📊 Response structure: hasFoods=${response.hasFoods}, foodCount=${response.foods.length}, category=${response.foodCategory}`);
+      } else {
+        logger.info(`⚠️ No foods added - isNutritionQuery: ${nutritionAnalysis?.isNutritionQuery}, count: ${nutritionAnalysis?.foods?.length || 0}`);
+      }
+
       // Store conversation
       this.storeConversationMessage(activeConversationId, {
         role: 'user',
@@ -149,7 +195,9 @@ class ChatbotService {
         content: response.content,
         timestamp: new Date().toISOString(),
         exercises: response.exercises || [],
-        hasExercises: response.hasExercises || false
+        hasExercises: response.hasExercises || false,
+        foods: response.foods || [],
+        hasFoods: response.hasFoods || false
       });
 
       return {
@@ -162,7 +210,11 @@ class ChatbotService {
         actionItems: response.actionItems || [],
         exercises: response.exercises || [],
         hasExercises: response.hasExercises || false,
-        exerciseType: response.exerciseType || null
+        exerciseType: response.exerciseType || null,
+        foods: response.foods || [],
+        hasFoods: response.hasFoods || false,
+        foodCategory: response.foodCategory || null,
+        mealTime: response.mealTime || null
       };
 
     } catch (error: any) {
@@ -290,7 +342,48 @@ class ChatbotService {
   }
 
   private async buildAIContext(params: any): Promise<any> {
-    const { message, userProfile, conversationHistory, intent, knowledgeBase, userId, exerciseAnalysis } = params;
+    const { message, userProfile, conversationHistory, intent, userId, exerciseAnalysis, nutritionAnalysis } = params;
+
+    // ✅ NEW: Retrieve knowledge using RAG
+    let retrievedKnowledge = '';
+    
+    try {
+      // Determine category từ intent
+      let category: string | undefined;
+      if (intent.includes('workout') || intent.includes('exercise')) {
+        category = 'exercise';
+      } else if (intent.includes('nutrition') || intent.includes('meal')) {
+        category = 'nutrition';
+      } else if (intent.includes('goal') || intent.includes('motivation') || intent.includes('progress')) {
+        category = 'fitness';
+      }
+
+      // Semantic search trong knowledge embeddings
+      const knowledgeResults = await knowledgeVectorService.similaritySearch(
+        message,
+        5, // top 5
+        category
+      );
+
+      if (knowledgeResults.length > 0) {
+        retrievedKnowledge = '\n📚 KIẾN THỨC LIÊN QUAN (RAG):\n';
+        knowledgeResults.forEach((result, idx) => {
+          retrievedKnowledge += `${idx + 1}. ${result.content}\n`;
+          if (result.subcategory) {
+            retrievedKnowledge += `   (${result.category}/${result.subcategory}, similarity: ${(result.similarity! * 100).toFixed(1)}%)\n`;
+          }
+        });
+        logger.info(`✅ Retrieved ${knowledgeResults.length} knowledge items using RAG`);
+      } else {
+        // Fallback: dùng old knowledge base nếu không tìm thấy
+        logger.warn('No RAG results found, using fallback knowledge base');
+        retrievedKnowledge = knowledgeBase.getRelevantKnowledge(message, intent);
+      }
+    } catch (error) {
+      logger.error('Error retrieving knowledge with RAG:', error);
+      // Fallback to old method
+      retrievedKnowledge = knowledgeBase.getRelevantKnowledge(message, intent);
+    }
 
     // Format exercise data for AI if available
     let exerciseData = '';
@@ -325,6 +418,70 @@ class ChatbotService {
       exerciseData += '- Có thể đề xuất tạo kế hoạch tập luyện với những bài tập này\n\n';
     }
 
+    // ✅ NEW: Format food data for AI if available
+    let foodData = '';
+    if (nutritionAnalysis?.isNutritionQuery && nutritionAnalysis.foods.length > 0) {
+      foodData = '\n🍎 THỰC PHẨM PHÙ HỢP TỪ DATABASE:\n';
+      
+      // Add nutrition context if available
+      if (nutritionAnalysis.nutritionContext) {
+        const ctx = nutritionAnalysis.nutritionContext;
+        foodData += `\n📊 NGỮ CẢNH DINH DƯỠNG CỦA NGƯỜI DÙNG:\n`;
+        foodData += `- Mục tiêu: ${ctx.objective === Objective.LOSE_FAT ? 'Giảm cân' : ctx.objective === Objective.GAIN_MUSCLE ? 'Tăng cơ' : 'Duy trì'}\n`;
+        foodData += `- TDEE: ${ctx.tdee} calories/ngày\n`;
+        foodData += `- Target calories: ${ctx.targetCalories} calories/ngày\n`;
+        foodData += `- Target protein: ${ctx.targetProtein}g/ngày\n`;
+        foodData += `- Target carbs: ${ctx.targetCarbs}g/ngày\n`;
+        foodData += `- Target fat: ${ctx.targetFat}g/ngày\n\n`;
+      }
+      
+      if (nutritionAnalysis.category) {
+        foodData += `Danh mục: ${nutritionAnalysis.category}\n`;
+      }
+      if (nutritionAnalysis.mealTime) {
+        const mealTimeMap: Record<string, string> = {
+          'breakfast': 'Bữa sáng',
+          'lunch': 'Bữa trưa',
+          'dinner': 'Bữa tối',
+          'snack': 'Đồ ăn vặt'
+        };
+        foodData += `Bữa ăn: ${mealTimeMap[nutritionAnalysis.mealTime] || nutritionAnalysis.mealTime}\n`;
+      }
+      foodData += '\n';
+      
+      nutritionAnalysis.foods.forEach((food: any, index: number) => {
+        foodData += `${index + 1}. ${food.name}\n`;
+        foodData += `   - Calories: ${food.calories} kcal\n`;
+        foodData += `   - Protein: ${food.protein}g\n`;
+        foodData += `   - Carbs: ${food.carbs}g\n`;
+        foodData += `   - Fat: ${food.fat}g\n`;
+        if (food.fiber) {
+          foodData += `   - Fiber: ${food.fiber}g\n`;
+        }
+        if (food.description) {
+          foodData += `   - Mô tả: ${food.description.substring(0, 150)}${food.description.length > 150 ? '...' : ''}\n`;
+        }
+        if (food.benefits) {
+          foodData += `   - Lợi ích: ${food.benefits.substring(0, 150)}${food.benefits.length > 150 ? '...' : ''}\n`;
+        }
+        if (food.preparationTips) {
+          foodData += `   - Cách chế biến: ${food.preparationTips.substring(0, 100)}${food.preparationTips.length > 100 ? '...' : ''}\n`;
+        }
+        if (food.commonCombinations) {
+          foodData += `   - Kết hợp với: ${food.commonCombinations}\n`;
+        }
+        foodData += '\n';
+      });
+
+      foodData += '\n💡 HƯỚNG DẪN CHO AI:\n';
+      foodData += '- Giới thiệu các thực phẩm này một cách hấp dẫn và tự nhiên\n';
+      foodData += '- Giải thích lợi ích dinh dưỡng phù hợp với mục tiêu của người dùng\n';
+      foodData += '- Gợi ý cách chế biến và kết hợp các món ăn\n';
+      foodData += '- Đưa ra lời khuyên về portion size phù hợp\n';
+      foodData += '- Có thể đề xuất tạo meal plan với những thực phẩm này\n';
+      foodData += '- Trả lời tự nhiên, thân thiện như một chuyên gia dinh dưỡng\n\n';
+    }
+
     const systemPrompt = `Bạn là một AI Coach thông minh của ứng dụng GymMate, chuyên về fitness và dinh dưỡng.
 
 THÔNG TIN NGƯỜI DÙNG:
@@ -345,9 +502,9 @@ Lịch sử chat gần đây:
 ${conversationHistory.map((msg: any) => `${msg.role}: ${msg.content}`).join('\n')}
 ` : ''}
 
-KIẾN THỨC CƠ SỞ:
-${knowledgeBase}
+${retrievedKnowledge}
 ${exerciseData}
+${foodData}
 
 HƯỚNG DẪN:
 1. Trả lời bằng tiếng Việt, thân thiện và chuyên nghiệp
@@ -373,7 +530,7 @@ Hãy trả lời câu hỏi sau một cách hữu ích và chuyên nghiệp:`;
 
   private async generateGeminiResponse(context: any): Promise<any> {
     try {
-      const model = this.gemini!.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+      const model = this.gemini!.getGenerativeModel({ model: 'gemini-2.5-flash' });
       const prompt = `${context.systemPrompt}\n\nCâu hỏi: ${context.userMessage}`;
 
       const result = await model.generateContent(prompt);
@@ -479,6 +636,308 @@ Hãy trả lời câu hỏi sau một cách hữu ích và chuyên nghiệp:`;
   }
 
   /**
+   * Translate Vietnamese query to English for better exercise search
+   */
+  private async translateQuery(query: string): Promise<string> {
+    // Check cache first
+    if (this.translationCache.has(query)) {
+      const cached = this.translationCache.get(query)!;
+      logger.info(`Using cached translation: "${query}" → "${cached}"`);
+      return cached;
+    }
+
+    try {
+      if (!this.gemini) {
+        logger.warn('Gemini not available, using original query');
+        return query;
+      }
+
+      const model = this.gemini.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      const prompt = `Translate this Vietnamese fitness/exercise query to English. Return only the English translation, no explanation or additional text.
+
+Vietnamese: "${query}"
+English:`;
+
+      const result = await model.generateContent(prompt);
+      const translated = (await result.response.text()).trim();
+      
+      // Cache the translation
+      this.translationCache.set(query, translated);
+      
+      logger.info(`✅ Translated: "${query}" → "${translated}"`);
+      return translated;
+    } catch (error: any) {
+      logger.warn(`Translation failed for "${query}", using original:`, error.message);
+      return query; // Fallback to original query
+    }
+  }
+
+  /**
+   * Analyze message for nutrition intent and search foods using FoodVector
+   * Uses user profile to provide smart recommendations
+   */
+  private async analyzeNutritionIntent(
+    message: string,
+    userProfile?: any,
+    fitnessGoals?: any[]
+  ): Promise<{
+    isNutritionQuery: boolean;
+    foods: any[];
+    category?: string;
+    mealTime?: string;
+    nutritionContext?: any;
+  } | null> {
+    try {
+      const nutritionKeywords = [
+        'thực phẩm', 'món ăn', 'đồ ăn', 'food', 'meal', 'món',
+        'protein', 'carb', 'calo', 'calories', 'dinh dưỡng', 'nutrition',
+        'ăn', 'bữa', 'sáng', 'trưa', 'tối', 'breakfast', 'lunch', 'dinner', 'snack',
+        'thịt', 'cá', 'rau', 'trái cây', 'fruit', 'vegetable', 'meat', 'fish', 'seafood',
+        'gà', 'bò', 'heo', 'chicken', 'beef', 'pork', 'tôm', 'cua',
+        'gợi ý món', 'món gì', 'nên ăn', 'ăn gì', 'thực đơn',
+        'giảm cân', 'tăng cơ', 'bulk', 'cut', 'diet',
+        // ✅ MỞ RỘNG: Thêm keywords cho các query về dinh dưỡng
+        'gợi ý', 'đề xuất', 'suggest', 'recommend', 'recommendation',
+        'bữa sáng', 'bữa trưa', 'bữa tối', 'bữa phụ',
+        'yến mạch', 'trứng', 'sữa', 'chuối', 'thịt gà', 'cá hồi',
+        'healthy', 'lành mạnh', 'tốt cho', 'bổ dưỡng',
+        'macro', 'macros', 'chất đạm', 'chất béo', 'tinh bột',
+        'hỏi về', 'thông tin về', 'tác dụng của', 'lợi ích của'
+      ];
+
+      const lowerMessage = message.toLowerCase();
+      
+      // Check if message is about nutrition/food
+      const isNutritionQuery = nutritionKeywords.some(keyword =>
+        lowerMessage.includes(keyword.toLowerCase())
+      );
+
+      if (!isNutritionQuery) {
+        return null;
+      }
+
+      // Extract meal time if mentioned
+      let mealTime: string | undefined;
+      if (lowerMessage.includes('sáng') || lowerMessage.includes('breakfast') || lowerMessage.includes('bữa sáng')) {
+        mealTime = 'breakfast';
+      } else if (lowerMessage.includes('trưa') || lowerMessage.includes('lunch') || lowerMessage.includes('bữa trưa')) {
+        mealTime = 'lunch';
+      } else if (lowerMessage.includes('tối') || lowerMessage.includes('dinner') || lowerMessage.includes('bữa tối')) {
+        mealTime = 'dinner';
+      } else if (lowerMessage.includes('snack') || lowerMessage.includes('ăn vặt')) {
+        mealTime = 'snack';
+      }
+
+      // Extract category if mentioned
+      let category: string | undefined;
+      if (lowerMessage.includes('thịt') || lowerMessage.includes('meat')) {
+        category = 'meat';
+      } else if (lowerMessage.includes('cá') || lowerMessage.includes('fish') || lowerMessage.includes('seafood')) {
+        category = 'seafood';
+      } else if (lowerMessage.includes('rau') || lowerMessage.includes('vegetable')) {
+        category = 'vegetable';
+      } else if (lowerMessage.includes('trái cây') || lowerMessage.includes('fruit')) {
+        category = 'fruit';
+      } else if (lowerMessage.includes('gà') || lowerMessage.includes('chicken')) {
+        category = 'poultry';
+      }
+
+      // Calculate nutrition context from user profile
+      let nutritionContext: any = null;
+      if (userProfile) {
+        try {
+          // Get user goal if available
+          const goal = fitnessGoals && fitnessGoals.length > 0 ? fitnessGoals[0] : null;
+          
+          if (goal && userProfile.weight && userProfile.height && userProfile.age) {
+            // Calculate nutrition targets
+            const nutritionTarget = this.nutritionCalculator.calculateNutritionTarget(
+              {
+                age: userProfile.age,
+                gender: userProfile.gender,
+                height: userProfile.height_cm || userProfile.height,
+                weight: userProfile.weight_kg || userProfile.weight,
+                bmi: userProfile.bmi,
+                fitnessLevel: userProfile.fitnessLevel || 'BEGINNER'
+              },
+              {
+                id: goal.id || '',
+                objectiveType: goal.objectiveType || Objective.MAINTAIN,
+                sessionsPerWeek: goal.sessionsPerWeek || 3,
+                sessionMinutes: goal.sessionMinutes || 60
+              },
+              true // Assume training day for now
+            );
+
+            nutritionContext = {
+              targetCalories: nutritionTarget.targetCalories,
+              targetProtein: nutritionTarget.macros.proteinG,
+              targetCarbs: nutritionTarget.macros.carbsG,
+              targetFat: nutritionTarget.macros.fatG,
+              tdee: nutritionTarget.tdee,
+              objective: goal.objectiveType || Objective.MAINTAIN
+            };
+
+            logger.info(`📊 Calculated nutrition context: ${nutritionContext.targetCalories} cal, ${nutritionContext.targetProtein}g protein`);
+          }
+        } catch (error) {
+          logger.warn('Failed to calculate nutrition context:', error);
+        }
+      }
+
+      // Search for foods
+      let foods: any[] = [];
+
+      try {
+        // ✅ CẢI THIỆN: Build better query text giống meal plan service để embedding tốt hơn
+        let searchQuery = message;
+        if (mealTime && nutritionContext) {
+          // Build query text chi tiết hơn với context
+          const mealTimeMap: Record<string, string> = {
+            'breakfast': 'bữa sáng',
+            'lunch': 'bữa trưa',
+            'dinner': 'bữa tối',
+            'snack': 'đồ ăn vặt'
+          };
+          
+          const mealCalories = Math.round(nutritionContext.targetCalories * 0.3);
+          searchQuery = `Gợi ý món ăn cho ${mealTimeMap[mealTime] || mealTime} với khoảng ${mealCalories} calories`;
+          
+          if (nutritionContext.objective === Objective.GAIN_MUSCLE) {
+            const mealProtein = Math.round(nutritionContext.targetProtein * 0.3);
+            searchQuery += `, giàu protein khoảng ${mealProtein}g`;
+          } else if (nutritionContext.objective === Objective.LOSE_FAT) {
+            searchQuery += `, ít calo, nhiều chất xơ`;
+          }
+        } else if (mealTime) {
+          // Nếu chỉ có mealTime, cải thiện query
+          const mealTimeMap: Record<string, string> = {
+            'breakfast': 'bữa sáng',
+            'lunch': 'bữa trưa',
+            'dinner': 'bữa tối',
+            'snack': 'đồ ăn vặt'
+          };
+          searchQuery = `Gợi ý món ăn cho ${mealTimeMap[mealTime] || mealTime}`;
+        }
+        
+        const queryEmbedding = await this.pgVector.embed(searchQuery);
+        
+        logger.info(`🔍 Searching foods for query: "${searchQuery}" (original: "${message}")`);
+
+        // ✅ Build filters - GIỐNG MEAL PLAN SERVICE: chỉ dùng maxCalories, KHÔNG dùng minProtein
+        const filters: any = {};
+        if (category) filters.category = category;
+        if (mealTime) filters.mealTime = mealTime;
+        
+        // Add nutrition filters if context available
+        if (nutritionContext) {
+          // Calculate max calories for this meal (30% of daily target) - giống meal plan service
+          filters.maxCalories = Math.round(nutritionContext.targetCalories * 0.3);
+          
+          // ❌ BỎ minProtein filter - quá strict, loại bỏ nhiều foods
+          // Scoring sẽ xử lý protein preference sau
+        }
+
+        logger.info(`📋 Food search filters: ${JSON.stringify(filters)}`);
+
+        // Search foods with filters - dùng constant để có nhiều options
+        const searchLimit = Math.min(NUTRITION_CONSTANTS.DEFAULT_SEARCH_LIMIT, 20); // Max 20 để không quá nhiều
+        const foodResults = await foodVectorService.searchFoodsByVector(
+          queryEmbedding,
+          filters,
+          [], // excludedIds - empty for now
+          searchLimit
+        );
+
+        logger.info(`🔍 Initial search returned ${foodResults?.length || 0} foods`);
+
+        // ✅ FALLBACK: Nếu không tìm thấy với filters, thử lại không có filters
+        let finalResults = foodResults || [];
+        if (finalResults.length === 0 && Object.keys(filters).length > 0) {
+          logger.warn('⚠️ No foods found with filters, trying without filters...');
+          const foodResultsNoFilter = await foodVectorService.searchFoodsByVector(
+            queryEmbedding,
+            {}, // No filters
+            [],
+            searchLimit
+          );
+          if (foodResultsNoFilter && foodResultsNoFilter.length > 0) {
+            finalResults = foodResultsNoFilter;
+            logger.info(`✅ Found ${finalResults.length} foods without filters`);
+          }
+        }
+
+        if (finalResults && finalResults.length > 0) {
+          // ✅ SORT và RANK theo nutrition context (giống meal plan service)
+          let sortedFoods = finalResults;
+          
+          if (nutritionContext) {
+            // Sort by similarity first, then by nutrition match
+            sortedFoods = finalResults.sort((a: any, b: any) => {
+              // Priority: similarity > protein (for muscle gain) > calories match
+              let scoreA = (a.similarity || 0) * 100;
+              let scoreB = (b.similarity || 0) * 100;
+              
+              if (nutritionContext.objective === Objective.GAIN_MUSCLE) {
+                // Bonus for high protein foods (max 30 bonus points)
+                scoreA += Math.min((a.protein || 0) / 2, 30);
+                scoreB += Math.min((b.protein || 0) / 2, 30);
+              } else if (nutritionContext.objective === Objective.LOSE_FAT) {
+                // Bonus for lower calories (max 20 bonus points)
+                scoreA += Math.max(0, 20 - (a.calories || 0) / 20);
+                scoreB += Math.max(0, 20 - (b.calories || 0) / 20);
+              }
+              
+              return scoreB - scoreA;
+            });
+          }
+          
+          // Take top foods after sorting (dùng constant thay vì hardcode)
+          const maxFoods = NUTRITION_CONSTANTS.MAX_RECOMMENDATIONS;
+          foods = sortedFoods.slice(0, maxFoods).map((food: any) => ({
+            id: food.foodId,
+            name: food.foodNameVi || food.foodName,
+            nameVi: food.foodNameVi,
+            nameEn: food.foodName,
+            calories: food.calories,
+            protein: food.protein,
+            carbs: food.carbs,
+            fat: food.fat,
+            fiber: food.fiber,
+            category: food.category,
+            mealTime: food.mealTime,
+            description: food.description,
+            benefits: food.detailedBenefits,
+            preparationTips: food.preparationTips,
+            commonCombinations: food.commonCombinations,
+            imageUrl: food.imageUrl,
+            similarity: food.similarity
+          }));
+
+          logger.info(`✅ Found ${foods.length} relevant foods from database (after sorting)`);
+        } else {
+          logger.warn(`⚠️ No foods found even without filters`);
+        }
+      } catch (error: any) {
+        logger.error('Error searching foods with FoodVector:', error);
+        foods = [];
+      }
+
+      return {
+        isNutritionQuery: true,
+        foods: foods || [],
+        category,
+        mealTime,
+        nutritionContext
+      };
+
+    } catch (error: any) {
+      logger.error('Error analyzing nutrition intent:', error);
+      return null;
+    }
+  }
+
+  /**
    * Analyze message for exercise intent and search exercises using pgVector
    */
   private async analyzeExerciseIntent(message: string): Promise<ExerciseAnalysis | null> {
@@ -542,12 +1001,17 @@ Hãy trả lời câu hỏi sau một cách hữu ích và chuyên nghiệp:`;
       }
 
       try {
-        // Use semantic search for better results
-        const searchQuery = targetMuscleGroup 
-          ? `${targetMuscleGroup} exercises workout`
-          : message;
+        // Translate query to English for better search results
+        const translatedQuery = await this.translateQuery(message);
         
-        const results = await this.pgVector.similaritySearch(searchQuery, 5);
+        // Build search query with translated text
+        const searchQuery = targetMuscleGroup 
+          ? `${translatedQuery} ${targetMuscleGroup} exercises`
+          : translatedQuery;
+        
+        logger.info(`🔍 Searching with translated query: "${searchQuery}"`);
+        
+        const results = await this.pgVector.similaritySearch(searchQuery, 5, 0.2);
         
         if (results && results.length > 0) {
           // Get exercise IDs from embedding documents

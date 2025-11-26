@@ -7,7 +7,8 @@
     "dev": "nodemon --watch src --ext ts,tsx --exec ts-node app.ts",
     "build": "tsc",
     "start:prod": "node dist/main.js",
-    "generate-embeddings": "ts-node src/scripts/generateEmbeddings.ts"
+    "generate-embeddings": "ts-node src/scripts/generateEmbeddings.ts",
+    "test-rag": "ts-node src/scripts/testRAG.ts"
   },
   "dependencies": {
     "@google/genai": "^1.21.0",
