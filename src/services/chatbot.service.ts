@@ -530,7 +530,7 @@ Hãy trả lời câu hỏi sau một cách hữu ích và chuyên nghiệp:`;
 
   private async generateGeminiResponse(context: any): Promise<any> {
     try {
-      const model = this.gemini!.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+      const model = this.gemini!.getGenerativeModel({ model: 'gemini-2.5-flash' });
       const prompt = `${context.systemPrompt}\n\nCâu hỏi: ${context.userMessage}`;
 
       const result = await model.generateContent(prompt);
@@ -652,7 +652,7 @@ Hãy trả lời câu hỏi sau một cách hữu ích và chuyên nghiệp:`;
         return query;
       }
 
-      const model = this.gemini.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+      const model = this.gemini.getGenerativeModel({ model: 'gemini-2.5-flash' });
       const prompt = `Translate this Vietnamese fitness/exercise query to English. Return only the English translation, no explanation or additional text.
 
 Vietnamese: "${query}"
