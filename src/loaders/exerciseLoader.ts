@@ -51,10 +51,22 @@ export class ExerciseLoader {
           id: row.id,
           slug: row.slug,
           name: row.name,
-          primaryMuscle: row.primary_muscle,
-          equipment: row.equipment,
-          bodyPart: row.body_part,
-          exerciseCategory: row.exercise_category,
+          primaryMuscle: {
+            code: row.primary_muscle,
+          },
+          secondaryMuscles: [],
+
+          equipment: {
+            code: row.equipment,
+            name: row.equipment_name,
+          },
+
+          bodyPart: row.body_part_name ?? row.body_part,
+
+          exerciseCategory: {
+            code: row.exercise_category,
+          },
+
           difficultyLevel: row.difficulty_level,
           instructions: row.instructions,
           safetyNotes: row.safety_notes,
@@ -62,7 +74,6 @@ export class ExerciseLoader {
           benefits: row.benefits,
           tags: row.tags || [],
           alternativeNames: row.alternative_names || [],
-          secondaryMuscles: [], // TODO:
         };
 
         exercises.push(exercise);
@@ -117,10 +128,6 @@ export class ExerciseLoader {
 
     // Body part variations
     tags.push(exercise.bodyPart.toLowerCase());
-
-    //TODO:
-    // tags.push(exercise.primaryMuscle.toString().toLowerCase());
-    // tags.push(exercise.secondaryMuscles.toString().toLowerCase());
 
     // Equipment-based tags
     if (exercise.equipment.code === "body_weight") {
