@@ -16,7 +16,6 @@ class GymPlanController {
     next: NextFunction
   ) => {
     try {
-      // Your business logic here
       const planRequest: PlanRequest = req.body;
 
       logger.info(

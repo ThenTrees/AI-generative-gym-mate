@@ -1,7 +1,4 @@
-import {
-  MealPlanGenerator,
-  mealPlanGenerator,
-} from "./mealPlanGenerator.service";
+import { mealPlanGenerator } from "./mealPlanGenerator.service";
 import { Pool, types } from "pg";
 import { PgVectorService } from "./pgVector.service";
 import { DATABASE_CONFIG } from "../configs/database";
@@ -25,7 +22,6 @@ import { SessionStructure } from "../types/model/sessionStructure";
 import { HealthConsideration } from "../types/model/healthConsideration";
 import { VolumeTargets } from "../types/model/volumeTargets";
 import { RestPeriods } from "../types/model/restPeriods";
-import { SearchQuery } from "../types/model/searchQuery";
 import { WorkoutCalculator } from "../utils/calculators";
 import { WORKOUT_CONSTANTS } from "../utils/constants";
 import {
@@ -37,6 +33,11 @@ import dayjs from "dayjs";
 import { Plan } from "../types/model/plan.model";
 import { PlanStrategy } from "../types/model/planStrategy";
 import { WorkoutSplit } from "../types/model/workoutSplit";
+import { healthAnalysisService } from "./healthAnalysis.service";
+import { planTitleService } from "./planTitle.service";
+import { ExerciseSelectionService } from "./exerciseSelection.service";
+import { workoutSplitService } from "./workoutSplit.service";
+import { PrescriptionService } from "./prescription.service";
 
 types.setTypeParser(1082, (val) => val);
 
@@ -44,12 +45,17 @@ class WorkoutPlanGeneratorService {
   private pool: Pool;
   private pgVectorService: PgVectorService;
   private workoutCalculator: WorkoutCalculator;
-  private mealPlanGenerator: MealPlanGenerator;
+  private exerciseSelectionService: ExerciseSelectionService;
+  private prescriptionService: PrescriptionService;
+
   constructor() {
     this.pool = new Pool(DATABASE_CONFIG);
     this.pgVectorService = new PgVectorService();
     this.workoutCalculator = new WorkoutCalculator();
-    this.mealPlanGenerator = new MealPlanGenerator();
+    this.exerciseSelectionService = new ExerciseSelectionService(
+      this.pgVectorService
+    );
+    this.prescriptionService = new PrescriptionService(this.workoutCalculator);
   }
   async initialize(): Promise<void> {
     logger.info("Initializing Workout Plan Generator Service...");
@@ -79,23 +85,25 @@ class WorkoutPlanGeneratorService {
         throw new Error("No active goal found");
       }
       // Step 1: Analyze user requirements and build search strategy
-      const planStrategy = this.analyzePlanRequirements(profile, goal);
-
-      // Step 2: Find relevant exercises using RAG
-      const selectedExercises = await this.selectExercisesUsingRAG(
+      const planStrategy = await this.analyzePlanRequirements(
         profile,
         goal,
-        planStrategy
+        request
       );
+
+      // Step 2: Find relevant exercises using RAG
+      const selectedExercises =
+        await this.exerciseSelectionService.selectExercisesUsingRAG(
+          profile,
+          goal,
+          planStrategy
+        );
 
       // Step 3: Calculate suggested weeks for the plan
       const suggestedWeeks = this.calculateSuggestedWeeks(profile, goal);
-      logger.info(
-        `[WorkoutPlanService] - Suggested plan duration: ${suggestedWeeks} weeks`
-      );
 
       // Step 4: Generate workout splits
-      const workoutSplits = this.generateWorkoutSplits(
+      const workoutSplits = workoutSplitService.generateWorkoutSplits(
         goal,
         planStrategy,
         suggestedWeeks
@@ -161,10 +169,11 @@ class WorkoutPlanGeneratorService {
    * @param request
    * @returns
    */
-  private analyzePlanRequirements(
+  private async analyzePlanRequirements(
     userProfile: UserProfile,
-    goal: Goal
-  ): PlanStrategy {
+    goal: Goal,
+    request: PlanRequest
+  ): Promise<PlanStrategy> {
     const suggestedWeeks = this.calculateSuggestedWeeks(userProfile, goal);
 
     return {
@@ -174,7 +183,11 @@ class WorkoutPlanGeneratorService {
       sessionStructure: this.determineSessionStructure(goal),
       equipmentPreferences: [], // TODO: update late
       // read field healthNote, if seen knee, back, shoulder problems -> warning
-      specialConsiderations: this.analyzeHealthConsiderations(userProfile),
+      specialConsiderations:
+        await healthAnalysisService.analyzeHealthConsiderations(
+          userProfile,
+          request.notes
+        ),
       // check level fitness for user -> calc intensity suitable
       intensityLevel: this.calculateIntensityLevel(userProfile, goal),
       // set, rep suitable for user based on level and objective
@@ -256,109 +269,6 @@ class WorkoutPlanGeneratorService {
       // Very high frequency = minimal exercises per session (5-6)
       return 5; // Minimal for very high frequency
     }
-  }
-
-  /**
-   * analyze about health for user
-   * @param userProfile
-   * @returns list health considerations
-   */
-  private analyzeHealthConsiderations(
-    userProfile: UserProfile
-  ): HealthConsideration[] {
-    const considerations: HealthConsideration[] = [];
-
-    if (userProfile.healthNote) {
-      const healthNote = userProfile.healthNote.toLowerCase();
-      // if have problem about health (knee)
-      if (healthNote.includes("knee")) {
-        logger.info("people with knee problems");
-        // những cân nhắc
-        considerations.push({
-          type: "injury_history",
-          affectedArea: "knee",
-          restrictions: ["high_impact", "deep_squat"],
-          modifications: ["partial_range", "low_impact_alternatives"],
-        });
-      }
-
-      // if have problem about back
-      if (healthNote.includes("back")) {
-        logger.info("people with back problems");
-        considerations.push({
-          type: "joint_limitation",
-          affectedArea: "spine",
-          restrictions: ["heavy_loading", "spinal_flexion"],
-          modifications: ["neutral_spine", "core_focus"],
-        });
-      }
-
-      // if have problem about shoulder
-      if (healthNote.includes("shoulder")) {
-        logger.info("people with shoulder problems");
-        considerations.push({
-          type: "injury_history",
-          affectedArea: "shoulder",
-          restrictions: ["overhead", "internal_rotation"],
-          modifications: ["reduced_range", "stability_focus"],
-        });
-      }
-
-      if (healthNote.includes("hip")) {
-        logger.info("people with hip problems");
-        considerations.push({
-          type: "mobility_issue",
-          affectedArea: "hip",
-          restrictions: ["deep_squat", "high_impact"],
-          modifications: ["shallow_squat", "controlled_range"],
-        });
-      }
-
-      if (healthNote.includes("ankle")) {
-        logger.info("people with ankle problems");
-        considerations.push({
-          type: "injury_history",
-          affectedArea: "ankle",
-          restrictions: ["jumping", "running"],
-          modifications: ["low_impact", "balance_training"],
-        });
-      }
-
-      if (healthNote.includes("wrist")) {
-        logger.info("people with wrist problems");
-        considerations.push({
-          type: "injury_history",
-          affectedArea: "wrist",
-          restrictions: ["push_up", "heavy_pressing"],
-          modifications: ["neutral_grip", "wrist_support"],
-        });
-      }
-
-      if (healthNote.includes("neck")) {
-        logger.info("people with neck problems");
-        considerations.push({
-          type: "mobility_issue",
-          affectedArea: "neck",
-          restrictions: ["heavy_shrugs", "awkward_positions"],
-          modifications: ["neutral_position", "mobility_focus"],
-        });
-      }
-
-      if (healthNote.includes("elbow")) {
-        logger.info("people with elbow problems");
-        considerations.push({
-          type: "injury_history",
-          affectedArea: "elbow",
-          restrictions: ["heavy_pressing", "hyperextension"],
-          modifications: ["controlled_range", "supportive_bracing"],
-        });
-      }
-    }
-
-    if (considerations.length == 0) {
-      logger.info("health for user very good!");
-    }
-    return considerations;
   }
 
   /**
@@ -563,738 +473,9 @@ class WorkoutPlanGeneratorService {
       );
     }
 
+    console.log("baseVolume", baseVolume);
+
     return baseVolume;
-  }
-
-  private async selectExercisesUsingRAG(
-    userProfile: UserProfile,
-    goal: Goal,
-    strategy: PlanStrategy
-  ): Promise<ExerciseWithScore[]> {
-    logger.info("Selecting exercises using RAG system...");
-
-    // Build comprehensive search queries for different movement patterns
-    const searchQueries = this.buildMovementPatternQueries(
-      userProfile,
-      goal,
-      strategy
-    );
-
-    const allExercises: ExerciseWithScore[] = [];
-
-    for (const query of searchQueries) {
-      const results = await this.pgVectorService.similaritySearch(
-        query.searchText,
-        query.maxResults,
-        0.3 // similarity threshold
-      );
-
-      const exerciseIds = results.map((r) => r.exerciseId);
-      const exercises = await this.pgVectorService.getExercisesByIds(
-        exerciseIds
-      );
-
-      // Combine exercises with their similarity scores and movement pattern info
-      const exercisesWithScores: ExerciseWithScore[] = exercises.map(
-        (exercise) => {
-          const result = results.find((r) => r.exerciseId === exercise.id);
-          return {
-            exercise,
-            similarityScore: result?.similarity || 0,
-            movementPattern: query.movementPattern,
-            priority: query.priority,
-          };
-        }
-      );
-
-      allExercises.push(...exercisesWithScores);
-      console.log(`exercisesWithScores: ${exercisesWithScores.length}`);
-    }
-
-    // Remove duplicates and apply filtering
-    const uniqueExercises = this.removeDuplicateExercises(allExercises);
-    const filteredExercises = this.applyExerciseFilters(
-      uniqueExercises,
-      strategy
-    );
-
-    console.log(
-      `Selected ${filteredExercises.length} exercises from RAG system`
-    );
-    return filteredExercises;
-  }
-
-  private buildMovementPatternQueries(
-    userProfile: UserProfile,
-    goal: Goal,
-    strategy: PlanStrategy
-  ): SearchQuery[] {
-    const queries: SearchQuery[] = [];
-
-    // Core movement patterns for comprehensive training
-    const movementPatterns = [
-      {
-        pattern: "squat",
-        searchTerms: "squat hip hinge quad glute compound lower body",
-        priority: 1,
-        maxResults: 8,
-      },
-      {
-        pattern: "hinge",
-        searchTerms: "deadlift hinge posterior chain hamstring glute",
-        priority: 1,
-        maxResults: 8,
-      },
-      {
-        pattern: "lunge",
-        searchTerms:
-          "lunge split squat unilateral single leg quad glute balance",
-        priority: 2,
-        maxResults: 6,
-      },
-      {
-        pattern: "push_vertical",
-        searchTerms: "press overhead shoulder vertical push",
-        priority: 2,
-        maxResults: 6,
-      },
-      {
-        pattern: "push_horizontal",
-        searchTerms: "press chest horizontal push bench",
-        priority: 1,
-        maxResults: 8,
-      },
-      {
-        pattern: "pull_vertical",
-        searchTerms: "pull up lat pulldown vertical pull back",
-        priority: 1,
-        maxResults: 8,
-      },
-      {
-        pattern: "pull_horizontal",
-        searchTerms: "row pull horizontal back rhomboids",
-        priority: 1,
-        maxResults: 8,
-      },
-      {
-        pattern: "carry",
-        searchTerms: "carry walk farmer core stability",
-        priority: 3,
-        maxResults: 4,
-      },
-      {
-        pattern: "core",
-        searchTerms: "plank core abs stability anti-extension",
-        priority: 2,
-        maxResults: 6,
-      },
-      {
-        pattern: "rotation",
-        searchTerms: "rotation anti-rotation core oblique twist woodchop",
-        priority: 2,
-        maxResults: 6,
-      },
-      {
-        pattern: "gait",
-        searchTerms: "walk run sprint locomotion movement pattern",
-        priority: 3,
-        maxResults: 4,
-      },
-    ];
-
-    // Add cardio if weight loss or endurance goal
-    if (
-      goal.objectiveType === Objective.LOSE_FAT ||
-      goal.objectiveType === Objective.ENDURANCE
-    ) {
-      movementPatterns.push({
-        pattern: "cardio",
-        searchTerms: "cardio conditioning metabolic circuit",
-        priority: 1,
-        maxResults: 10,
-      });
-    }
-
-    // Build search queries with user context
-    for (const pattern of movementPatterns) {
-      let searchText = pattern.searchTerms;
-
-      // Add user level
-      searchText += ` ${userProfile.fitnessLevel.toLowerCase()}`;
-
-      // Add equipment preferences
-      if (
-        // strategy.equipmentPreferences.length === 0 || current is empty, i'll enhance in the future
-        strategy.equipmentPreferences.includes("bodyweight") ||
-        strategy.equipmentPreferences.includes("body_weight") ||
-        strategy.equipmentPreferences.includes("home_workout")
-      ) {
-        searchText += " bodyweight no equipment home";
-      } else if (strategy.equipmentPreferences.includes("gym")) {
-        searchText += " gym equipment weights";
-      }
-
-      // Add objective context
-      searchText += ` ${goal.objectiveType.toLowerCase().replace("_", " ")}`;
-
-      let searchTerms = [];
-
-      for (const consideration of strategy.specialConsiderations) {
-        switch (consideration.affectedArea) {
-          case "knee":
-            // Nếu động tác liên quan squat, thêm từ khóa an toàn cho đầu gối
-            if (pattern.pattern.includes("squat")) {
-              searchTerms.push("knee safe low impact");
-            }
-            break;
-          case "spine":
-            // Nếu động tác liên quan hinge, thêm từ khóa an toàn cho lưng
-            if (pattern.pattern.includes("hinge")) {
-              searchTerms.push("back safe neutral spine");
-            }
-            break;
-          case "shoulder":
-            // Nếu động tác liên quan push, thêm từ khóa an toàn cho vai
-            if (pattern.pattern.includes("push")) {
-              searchTerms.push("shoulder safe moderate range");
-            }
-            break;
-          case "hip":
-            if (
-              pattern.pattern.includes("squat") ||
-              pattern.pattern.includes("hinge")
-            ) {
-              searchTerms.push("hip safe controlled range");
-            }
-            break;
-          case "ankle":
-            if (
-              pattern.pattern.includes("jump") ||
-              pattern.pattern.includes("run")
-            ) {
-              searchTerms.push("ankle safe low impact");
-            }
-            break;
-          case "wrist":
-            if (
-              pattern.pattern.includes("push") ||
-              pattern.pattern.includes("press")
-            ) {
-              searchTerms.push("wrist safe neutral grip");
-            }
-            break;
-          case "neck":
-            searchTerms.push("neck safe neutral position");
-            break;
-          case "elbow":
-            if (
-              pattern.pattern.includes("push") ||
-              pattern.pattern.includes("press")
-            ) {
-              searchTerms.push("elbow safe controlled range");
-            }
-            break;
-        }
-      }
-
-      // Ghép các từ khóa thành một chuỗi
-      searchText += " " + searchTerms.join(" ");
-
-      queries.push({
-        movementPattern: pattern.pattern,
-        searchText: searchText.trim(),
-        priority: pattern.priority,
-        maxResults: pattern.maxResults,
-      });
-    }
-
-    return queries;
-  }
-
-  private removeDuplicateExercises(
-    exercises: ExerciseWithScore[]
-  ): ExerciseWithScore[] {
-    const seen = new Set<string>();
-    return exercises.filter((exerciseData) => {
-      if (seen.has(exerciseData.exercise.id)) {
-        return false;
-      }
-      seen.add(exerciseData.exercise.id);
-      return true;
-    });
-  }
-
-  private applyExerciseFilters(
-    exercises: ExerciseWithScore[],
-    strategy: PlanStrategy
-  ): ExerciseWithScore[] {
-    return exercises.filter((exerciseData) => {
-      const { exercise } = exerciseData;
-
-      // Difficulty level filter
-      //todo
-      const levelFilter = this.getDifficultyRange(strategy.experienceLevel);
-      if (
-        exercise.difficultyLevel < levelFilter.min ||
-        exercise.difficultyLevel > levelFilter.max
-      ) {
-        return false;
-      }
-
-      // Health considerations filter
-      for (const consideration of strategy.specialConsiderations) {
-        if (this.violatesHealthRestriction(exercise, consideration)) {
-          return false;
-        }
-      }
-
-      // Equipment preference filter
-      if (strategy.equipmentPreferences.length > 0) {
-        const hasPreferredEquipment = this.matchesEquipmentPreference(
-          exercise,
-          strategy.equipmentPreferences
-        );
-        if (!hasPreferredEquipment) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }
-
-  // TODO: must change Difficulty level
-  private getDifficultyRange(level: string): { min: number; max: number } {
-    switch (level) {
-      case FitnessLevel.BEGINNER:
-        return { min: 1, max: 3 };
-      case FitnessLevel.INTERMEDIATE:
-        return { min: 2, max: 4 };
-      case FitnessLevel.ADVANCED:
-        return { min: 3, max: 5 };
-      default:
-        return { min: 1, max: 5 };
-    }
-  }
-
-  private violatesHealthRestriction(
-    exercise: Exercise,
-    consideration: HealthConsideration
-  ): boolean {
-    const exerciseName = exercise.name.toLowerCase();
-    const instructions = exercise.instructions?.toString()?.toLowerCase() || "";
-
-    for (const restriction of consideration.restrictions) {
-      switch (restriction) {
-        case "high_impact":
-          if (
-            exerciseName.includes("jump") ||
-            exerciseName.includes("plyometric") ||
-            exerciseName.includes("run") ||
-            instructions.includes("jump") ||
-            instructions.includes("plyometric") ||
-            instructions.includes("run")
-          )
-            return true;
-          break;
-
-        case "deep_squat":
-          if (
-            exerciseName.includes("deep squat") ||
-            exerciseName.includes("full squat") ||
-            instructions.includes("deep squat") ||
-            instructions.includes("full squat")
-          )
-            return true;
-          break;
-
-        case "overhead":
-          if (
-            exerciseName.includes("overhead") ||
-            exerciseName.includes("military press") ||
-            instructions.includes("overhead") ||
-            instructions.includes("military press")
-          )
-            return true;
-          break;
-
-        case "internal_rotation":
-          if (
-            exerciseName.includes("internal rotation") ||
-            instructions.includes("internal rotation")
-          )
-            return true;
-          break;
-
-        case "spinal_flexion":
-          if (
-            exerciseName.includes("crunch") ||
-            exerciseName.includes("sit-up") ||
-            instructions.includes("crunch") ||
-            instructions.includes("sit-up")
-          )
-            return true;
-          break;
-
-        case "push_up":
-          if (
-            exerciseName.includes("push-up") ||
-            instructions.includes("push-up")
-          )
-            return true;
-          break;
-
-        case "heavy_pressing":
-          if (exerciseName.includes("press") || instructions.includes("press"))
-            return true;
-          break;
-
-        case "heavy_shrugs":
-          if (exerciseName.includes("shrug") || instructions.includes("shrug"))
-            return true;
-          break;
-
-        case "awkward_positions":
-          if (
-            exerciseName.includes("awkward") ||
-            instructions.includes("awkward")
-          )
-            return true;
-          break;
-
-        case "jumping":
-          if (exerciseName.includes("jump") || instructions.includes("jump"))
-            return true;
-          break;
-
-        case "running":
-          if (exerciseName.includes("run") || instructions.includes("run"))
-            return true;
-          break;
-
-        case "hyperextension":
-          if (
-            exerciseName.includes("hyperextension") ||
-            instructions.includes("hyperextension")
-          )
-            return true;
-          break;
-
-        default:
-          break;
-      }
-    }
-
-    return false;
-  }
-
-  private matchesEquipmentPreference(
-    exercise: Exercise,
-    preferences: string[]
-  ): boolean {
-    if (
-      preferences.includes("bodyweight") &&
-      exercise.equipment.code === "body_weight"
-    ) {
-      return true;
-    }
-    if (
-      preferences.includes("home_workout") &&
-      ["body_weight", "dumbbell", "resistance_band"].includes(
-        exercise.equipment.code
-      )
-    ) {
-      return true;
-    }
-    if (
-      preferences.includes("gym") &&
-      !["body_weight"].includes(exercise.equipment.code)
-    ) {
-      return true;
-    }
-    return preferences.length === 0; // No preference means accept all
-  }
-
-  private generateWorkoutSplits(
-    goal: Goal,
-    strategy: PlanStrategy,
-    totalWeeks: number
-  ): WorkoutSplit[] {
-    const splits: WorkoutSplit[] = [];
-
-    switch (strategy.sessionStructure.type) {
-      case "full_body":
-        splits.push(
-          ...this.generateFullBodySplits(
-            goal.sessionsPerWeek,
-            strategy,
-            totalWeeks
-          )
-        );
-        break;
-      case "full_body_varied":
-        splits.push(
-          ...this.generateVariedFullBodySplits(
-            goal.sessionsPerWeek,
-            strategy,
-            totalWeeks
-          )
-        );
-        break;
-      case "upper_lower":
-        splits.push(
-          ...this.generateUpperLowerSplits(
-            goal.sessionsPerWeek,
-            strategy,
-            totalWeeks
-          )
-        );
-        break;
-      case "body_part_split":
-        splits.push(
-          ...this.generateBodyPartSplits(
-            goal.sessionsPerWeek,
-            strategy,
-            totalWeeks
-          )
-        );
-        break;
-    }
-
-    // Apply progressive overload to all splits
-    return this.applyProgressiveOverloadToSplits(
-      splits,
-      strategy.progressiveOverloadConfig
-    );
-  }
-
-  private applyProgressiveOverloadToSplits(
-    splits: WorkoutSplit[],
-    progressiveConfig: ProgressiveOverloadConfig
-  ): WorkoutSplit[] {
-    return splits.map((split, index) => {
-      const week = Math.floor(index / 7) + 1; // Assuming 7 sessions per week max
-      const weeklyProgression =
-        ProgressiveOverloadCalculator.calculateWeeklyProgression(
-          progressiveConfig,
-          week,
-          Math.ceil(splits.length / 7) // Total weeks
-        );
-
-      return {
-        ...split,
-        weeklyProgression,
-        phase: weeklyProgression.phase,
-        isDeloadWeek: weeklyProgression.isDeloadWeek,
-        intensityLevel: Math.round(
-          split.intensityLevel * weeklyProgression.intensityModifier
-        ),
-      };
-    });
-  }
-
-  private generateFullBodySplits(
-    sessionsPerWeek: number,
-    strategy: PlanStrategy,
-    totalWeeks: number
-  ): WorkoutSplit[] {
-    const splits: WorkoutSplit[] = [];
-
-    for (let i = 0; i < sessionsPerWeek * totalWeeks; i++) {
-      splits.push({
-        name: `Full Body ${i + 1}`, // must generate from AI, diverse title for plan day.
-        focus: "full_body",
-        movementPatterns: [
-          "squat",
-          "hinge",
-          "push_horizontal",
-          "pull_horizontal",
-          "core",
-        ],
-        primaryMuscles: [
-          "quadriceps",
-          "hamstrings",
-          "pectorals",
-          "latissimus_dorsi",
-          "deltoids",
-        ],
-        exerciseCount: strategy.sessionStructure.exercisesPerSession,
-        intensityLevel: strategy.intensityLevel.level,
-      });
-    }
-
-    return splits;
-  }
-
-  private generateVariedFullBodySplits(
-    sessionsPerWeek: number,
-    strategy: PlanStrategy,
-    totalWeeks: number
-  ): WorkoutSplit[] {
-    const splitVariations = [
-      {
-        name: "Full Body - Push Focus",
-        movementPatterns: [
-          "squat",
-          "push_horizontal",
-          "push_vertical",
-          "pull_horizontal",
-          "core",
-        ],
-        primaryMuscles: [
-          "quadriceps",
-          "pectorals",
-          "deltoids",
-          "latissimus_dorsi",
-          "abdominals",
-        ],
-      },
-      {
-        name: "Full Body - Pull Focus",
-        movementPatterns: [
-          "hinge",
-          "pull_horizontal",
-          "pull_vertical",
-          "push_horizontal",
-          "core",
-        ],
-        primaryMuscles: [
-          "hamstrings",
-          "latissimus_dorsi",
-          "rhomboids",
-          "pectorals",
-          "abdominals",
-        ],
-      },
-      {
-        name: "Full Body - Lower Focus",
-        movementPatterns: [
-          "squat",
-          "hinge",
-          "carry",
-          "push_horizontal",
-          "core",
-        ],
-        primaryMuscles: [
-          "quadriceps",
-          "hamstrings",
-          "glutes",
-          "pectorals",
-          "abdominals",
-        ],
-      },
-    ];
-
-    const totalSessions = sessionsPerWeek * totalWeeks;
-    const result = Array.from({ length: totalSessions }, (_, i) => {
-      const split = splitVariations[i % splitVariations.length];
-      return {
-        ...split,
-        focus: "full_body",
-        exerciseCount: strategy.sessionStructure.exercisesPerSession,
-        intensityLevel: strategy.intensityLevel.level,
-      };
-    });
-    return result;
-  }
-
-  private generateUpperLowerSplits(
-    sessionsPerWeek: number,
-    strategy: PlanStrategy,
-    totalWeeks: number
-  ): WorkoutSplit[] {
-    const upperSplit: WorkoutSplit = {
-      name: "Upper Body",
-      focus: "upper_body",
-      movementPatterns: [
-        "push_horizontal",
-        "push_vertical",
-        "pull_horizontal",
-        "pull_vertical",
-      ],
-      primaryMuscles: [
-        "pectorals",
-        "deltoids",
-        "latissimus_dorsi",
-        "rhomboids",
-        "biceps",
-        "triceps",
-      ],
-      exerciseCount: strategy.sessionStructure.exercisesPerSession,
-      intensityLevel: strategy.intensityLevel.level,
-    };
-
-    const lowerSplit: WorkoutSplit = {
-      name: "Lower Body",
-      focus: "lower_body",
-      movementPatterns: ["squat", "hinge", "carry", "core"],
-      primaryMuscles: [
-        "quadriceps",
-        "hamstrings",
-        "glutes",
-        "calves",
-        "abdominals",
-      ],
-      exerciseCount: strategy.sessionStructure.exercisesPerSession,
-      intensityLevel: strategy.intensityLevel.level,
-    };
-
-    const splits: WorkoutSplit[] = [];
-    for (let i = 0; i < sessionsPerWeek * totalWeeks; i++) {
-      splits.push(i % 2 === 0 ? upperSplit : lowerSplit);
-    }
-
-    return splits;
-  }
-
-  private generateBodyPartSplits(
-    sessionsPerWeek: number,
-    strategy: PlanStrategy,
-    totalWeeks: number
-  ): WorkoutSplit[] {
-    const bodyPartSplits = [
-      {
-        name: "Chest & Triceps",
-        focus: "chest_triceps",
-        movementPatterns: ["push_horizontal", "push_vertical"],
-        primaryMuscles: ["pectorals", "triceps", "deltoids"],
-      },
-      {
-        name: "Back & Biceps",
-        focus: "back_biceps",
-        movementPatterns: ["pull_horizontal", "pull_vertical"],
-        primaryMuscles: ["latissimus_dorsi", "rhomboids", "biceps"],
-      },
-      {
-        name: "Legs & Glutes",
-        focus: "legs_glutes",
-        movementPatterns: ["squat", "hinge"],
-        primaryMuscles: ["quadriceps", "hamstrings", "glutes", "calves"],
-      },
-      {
-        name: "Shoulders & Core",
-        focus: "shoulders_core",
-        movementPatterns: ["push_vertical", "core"],
-        primaryMuscles: ["deltoids", "abdominals"],
-      },
-      {
-        name: "Arms & Accessories",
-        focus: "arms",
-        movementPatterns: ["push_horizontal", "pull_horizontal"],
-        primaryMuscles: ["biceps", "triceps", "forearms"],
-      },
-    ];
-
-    const totalSessions = sessionsPerWeek * totalWeeks;
-    const result = Array.from({ length: totalSessions }, (_, i) => {
-      const split = bodyPartSplits[i % bodyPartSplits.length];
-      return {
-        ...split,
-        exerciseCount: strategy.sessionStructure.exercisesPerSession,
-        intensityLevel: strategy.intensityLevel.level,
-      };
-    });
-    return result;
   }
 
   private async createPlanInDatabase(
@@ -1313,7 +494,7 @@ class WorkoutPlanGeneratorService {
       await client.query("BEGIN");
 
       // Generate AI-suggested title
-      const aiGeneratedTitle = this.generatePlanTitle(
+      const aiGeneratedTitle = planTitleService.generatePlanTitle(
         userProfile,
         goal,
         suggestedWeeks
@@ -1450,7 +631,7 @@ class WorkoutPlanGeneratorService {
           itemIndex++
         ) {
           const exerciseData = selectedExercises[itemIndex];
-          const prescription = this.generatePrescription(
+          const prescription = this.prescriptionService.generatePrescription(
             exerciseData.exercise,
             profile,
             goal,
@@ -1469,7 +650,10 @@ class WorkoutPlanGeneratorService {
               exerciseData.exercise.id,
               itemIndex + 1,
               JSON.stringify(prescription),
-              this.generateExerciseNote(exerciseData.exercise, profile),
+              this.prescriptionService.generateExerciseNote(
+                exerciseData.exercise,
+                profile
+              ),
               exerciseData.similarityScore,
             ]
           );
@@ -1478,7 +662,10 @@ class WorkoutPlanGeneratorService {
             exercise: exerciseData.exercise,
             itemIndex: itemIndex + 1,
             prescription,
-            notes: this.generateExerciseNote(exerciseData.exercise, profile),
+            notes: this.prescriptionService.generateExerciseNote(
+              exerciseData.exercise,
+              profile
+            ),
             // similarityScore: exerciseData.similarityScore,
           });
         }
@@ -1582,369 +769,6 @@ class WorkoutPlanGeneratorService {
     return selected;
   }
 
-  private generatePrescription(
-    exercise: Exercise,
-    userProfile: UserProfile,
-    goal: Goal,
-    split: WorkoutSplit
-  ): Prescription {
-    const baseReps = this.workoutCalculator.calculateReps(
-      goal.objectiveType,
-      userProfile.fitnessLevel,
-      exercise
-    );
-    const baseSets = this.workoutCalculator.calculateSets(
-      goal.objectiveType,
-      userProfile.fitnessLevel,
-      exercise
-    );
-
-    // Handle duration-based exercises
-    const isDurationBased =
-      exercise.name.toLowerCase().includes("plank") ||
-      exercise.name.toLowerCase().includes("hold") ||
-      exercise.exerciseCategory.code === "cardio";
-
-    const baseWeight = this.calculateWeight(exercise, userProfile, goal);
-
-    // Apply progressive overload if weekly progression is available
-    let finalSets = baseSets;
-    let finalReps = baseReps;
-    let finalWeight = baseWeight;
-    let rpe: number | undefined;
-
-    if (split.weeklyProgression) {
-      const progression = split.weeklyProgression;
-
-      // Apply volume progression
-      finalSets = Math.round(
-        baseSets * progression.volumeModifier + progression.setsAdjustment
-      );
-      finalSets = Math.max(1, Math.min(8, finalSets)); // Keep within reasonable bounds
-
-      if (!isDurationBased) {
-        finalReps = Math.round(baseReps + progression.repsAdjustment);
-        finalReps = Math.max(5, Math.min(30, finalReps)); // Keep within reasonable bounds
-      }
-
-      // Apply weight progression
-      if (exercise.equipment.code !== "body_weight" && baseWeight > 0) {
-        finalWeight = baseWeight + progression.weightIncrease;
-        finalWeight = Math.max(2.5, finalWeight); // Minimum weight
-      }
-
-      // Calculate RPE based on progressive overload
-      rpe = this.calculateRPEFromProgression(
-        userProfile.fitnessLevel,
-        goal.objectiveType,
-        progression
-      );
-    }
-
-    return {
-      sets: finalSets,
-      reps: isDurationBased ? undefined : finalReps,
-      duration: isDurationBased
-        ? this.calculateDuration(exercise, userProfile.fitnessLevel)
-        : undefined,
-      weight: finalWeight,
-      restTime: this.calculateRestTime(
-        exercise,
-        goal.objectiveType,
-        userProfile.fitnessLevel
-      ),
-      intensity: this.calculateIntensity(
-        userProfile.fitnessLevel,
-        goal.objectiveType,
-        exercise
-      ),
-      rpe,
-      progressiveOverload: split.weeklyProgression
-        ? {
-            baseSets,
-            baseReps: isDurationBased ? undefined : baseReps,
-            baseWeight,
-            weeklyProgression: {
-              setsIncrease: split.weeklyProgression.setsAdjustment,
-              repsAdjustment: split.weeklyProgression.repsAdjustment,
-              weightIncrease: split.weeklyProgression.weightIncrease,
-            },
-          }
-        : undefined,
-    };
-  }
-
-  private calculateRPEFromProgression(
-    fitnessLevel: FitnessLevel,
-    objective: Objective,
-    progression: WeeklyProgression
-  ): number {
-    let baseRPE = 6; // Default moderate RPE
-
-    // Adjust base RPE based on fitness level
-    switch (fitnessLevel) {
-      case FitnessLevel.BEGINNER:
-        baseRPE = 6;
-        break;
-      case FitnessLevel.INTERMEDIATE:
-        baseRPE = 7;
-        break;
-      case FitnessLevel.ADVANCED:
-        baseRPE = 8;
-        break;
-    }
-
-    // Adjust based on phase
-    switch (progression.phase) {
-      case "foundation":
-        baseRPE -= 0.5;
-        break;
-      case "build":
-        baseRPE += 0;
-        break;
-      case "peak":
-        baseRPE += 1;
-        break;
-      case "deload":
-        baseRPE -= 1.5;
-        break;
-    }
-
-    // Adjust based on objective
-    if (objective === Objective.ENDURANCE) {
-      baseRPE -= 0.5; // Lower RPE for endurance
-    } else if (objective === Objective.GAIN_MUSCLE) {
-      baseRPE += 0.5; // Higher RPE for muscle gain
-    }
-
-    // Ensure RPE is within valid range (5-10)
-    return Math.max(5, Math.min(10, Math.round(baseRPE * 10) / 10));
-  }
-
-  private calculateDuration(exercise: Exercise, level: FitnessLevel): number {
-    const baseDurations = {
-      BEGINNER: 30,
-      INTERMEDIATE: 45,
-      ADVANCED: 60,
-    };
-
-    let duration = baseDurations[level] || 45;
-
-    // Exercise-specific adjustments
-    if (exercise.name.toLowerCase().includes("plank")) {
-      return duration;
-    } else if (exercise.exerciseCategory.code === "cardio") {
-      return duration * 8; // 4-8 minutes for cardio
-    }
-
-    return duration;
-  }
-
-  /**
-   * calc weight cần tác động
-   * @param exercise
-   * @param userProfile
-   * @param goal
-   * @returns
-   */
-  private calculateWeight(
-    exercise: Exercise,
-    userProfile: UserProfile,
-    goal: Goal
-  ): number {
-    if (exercise.equipment.code === "body_weight") {
-      return 0;
-    }
-
-    const bodyweight = userProfile.weight;
-    let levelMultiplier: number;
-
-    switch (userProfile.fitnessLevel) {
-      case FitnessLevel.BEGINNER:
-        levelMultiplier = 0.4;
-        break;
-      case FitnessLevel.INTERMEDIATE:
-        levelMultiplier = 0.6;
-        break;
-      case FitnessLevel.ADVANCED:
-        levelMultiplier = 0.8;
-        break;
-      default:
-        levelMultiplier = 0.5;
-    }
-
-    // Base percentage by body part/exercise type
-    let basePercentage: number;
-    switch (exercise.bodyPart) {
-      case "chest":
-        basePercentage = 0.6; // 60% bodyweight for chest
-        break;
-      case "upper_legs":
-        basePercentage = 1.0; // 100% bodyweight for legs
-        break;
-      case "back":
-        basePercentage = 0.7; // 70% bodyweight for back
-        break;
-      case "shoulders":
-        basePercentage = 0.3; // 30% bodyweight for shoulders
-        break;
-      case "upper_arms":
-        basePercentage = 0.25; // 25% bodyweight for arms
-        break;
-      default:
-        basePercentage = 0.4;
-    }
-
-    // Gender adjustment
-    if (userProfile.gender === Gender.FEMALE) {
-      basePercentage *= 0.75;
-    }
-
-    // Goal adjustment
-    if (goal.objectiveType === Objective.ENDURANCE) {
-      basePercentage *= 0.7; // Lighter weights for endurance
-    } else if (goal.objectiveType === Objective.GAIN_MUSCLE) {
-      basePercentage *= 1.1; // Heavier for muscle gain
-    }
-
-    const suggestedWeight = bodyweight * basePercentage * levelMultiplier;
-
-    // Round to nearest 2.5kg increment
-    return Math.max(2.5, Math.round(suggestedWeight / 2.5) * 2.5);
-  }
-
-  private calculateRestTime(
-    exercise: Exercise,
-    objective: string,
-    level: string
-  ): number {
-    let baseRest: number;
-
-    // Base rest by exercise type
-    if (
-      exercise.name.toLowerCase().includes("squat") ||
-      exercise.name.toLowerCase().includes("deadlift") ||
-      exercise.bodyPart === "upper_legs"
-    ) {
-      baseRest = 180; // 3 minutes for heavy compounds
-    } else if (exercise.bodyPart === "chest" || exercise.bodyPart === "back") {
-      baseRest = 120; // 2 minutes for upper compounds
-    } else if (
-      exercise.bodyPart === "upper_arms" ||
-      exercise.bodyPart === "waist"
-    ) {
-      baseRest = 60; // 1 minute for isolation
-    } else {
-      baseRest = 90; // Default 1.5 minutes
-    }
-
-    // Objective adjustments
-    switch (objective) {
-      case Objective.LOSE_FAT:
-        baseRest *= 0.7; // Shorter rest for fat loss
-        break;
-      case Objective.ENDURANCE:
-        baseRest *= 0.5; // Very short rest for endurance
-        break;
-      case Objective.GAIN_MUSCLE:
-        baseRest *= 1.0; // Standard rest for hypertrophy
-        break;
-    }
-
-    // Level adjustments
-    if (level === FitnessLevel.BEGINNER) {
-      baseRest *= 1.2; // Beginners need more rest
-    } else if (level === FitnessLevel.ADVANCED) {
-      baseRest *= 0.9; // Advanced can handle shorter rest
-    }
-
-    return Math.max(30, Math.min(300, Math.round(baseRest)));
-  }
-
-  private calculateIntensity(
-    level: string,
-    objective: string,
-    exercise: Exercise
-  ): Intensity {
-    if (level === FitnessLevel.BEGINNER) {
-      return Intensity.LOW;
-    } else if (
-      level === FitnessLevel.ADVANCED &&
-      (objective === Objective.LOSE_FAT || objective === Objective.GAIN_MUSCLE)
-    ) {
-      return Intensity.HIGH;
-    } else {
-      return Intensity.MEDIUM;
-    }
-  }
-
-  private generateExerciseNote(
-    exercise: Exercise,
-    userProfile: UserProfile
-  ): string {
-    const notes: string[] = [];
-
-    // Level-based notes
-    if (userProfile.fitnessLevel === FitnessLevel.BEGINNER) {
-      notes.push("Focus on proper form and controlled movement");
-
-      if (exercise.difficultyLevel >= 4) {
-        notes.push("Start with lighter weight or assisted variation");
-      }
-    }
-
-    // Health-based modifications
-    if (userProfile.healthNote) {
-      const healthNote = userProfile.healthNote.toLowerCase();
-
-      if (healthNote.includes("knee")) {
-        if (
-          exercise.bodyPart === "upper_legs" ||
-          exercise.name.toLowerCase().includes("squat")
-        ) {
-          notes.push("Modify range of motion if experiencing knee discomfort");
-          notes.push("Consider partial squats or box squats");
-        }
-      }
-
-      if (healthNote.includes("back")) {
-        if (
-          exercise.name.toLowerCase().includes("deadlift") ||
-          exercise.name.toLowerCase().includes("row")
-        ) {
-          notes.push("Maintain neutral spine throughout the movement");
-          notes.push("Engage core muscles for spinal stability");
-        }
-      }
-
-      if (healthNote.includes("shoulder")) {
-        if (
-          exercise.bodyPart === "shoulders" ||
-          exercise.name.toLowerCase().includes("press")
-        ) {
-          notes.push("Avoid overhead movements if experiencing shoulder pain");
-          notes.push("Start with reduced range of motion");
-        }
-      }
-    }
-
-    // Exercise-specific safety notes
-    if (exercise.safetyNotes) {
-      notes.push(exercise.safetyNotes);
-    }
-
-    // General form cues based on exercise type
-    if (exercise.name.toLowerCase().includes("plank")) {
-      notes.push("Maintain straight line from head to heels");
-    } else if (exercise.name.toLowerCase().includes("squat")) {
-      notes.push("Keep chest up and knees tracking over toes");
-    } else if (exercise.name.toLowerCase().includes("deadlift")) {
-      notes.push("Hinge at hips, keep bar close to body");
-    }
-
-    return notes.length > 0 ? notes.join(". ") + "." : "";
-  }
-
   private calculateTotalDuration(planItems: PlanItem[]): number {
     return planItems.reduce((total, item) => {
       const { prescription } = item;
@@ -1983,230 +807,6 @@ class WorkoutPlanGeneratorService {
   }
 
   /**
-   * Generate an AI-suggested title for the workout plan based on user profile and goal
-   * @param userProfile - User's fitness profile
-   * @param goal - User's fitness goal
-   * @param suggestedWeeks - Suggested duration in weeks
-   * @returns string - AI-generated plan title
-   */
-  private generatePlanTitle(
-    userProfile: UserProfile,
-    goal: Goal,
-    suggestedWeeks: number
-  ): string {
-    const fitnessLevel = userProfile.fitnessLevel;
-    const objective = goal.objectiveType;
-    const sessionsPerWeek = goal.sessionsPerWeek;
-    const sessionMinutes = goal.sessionMinutes;
-
-    // Create contextual title based on user profile and goals
-    const titleTemplates = this.getTitleTemplates(fitnessLevel, objective);
-    const selectedTemplate = this.selectBestTemplate(
-      titleTemplates,
-      userProfile,
-      goal,
-      suggestedWeeks
-    );
-
-    return this.customizeTitle(
-      selectedTemplate,
-      userProfile,
-      goal,
-      suggestedWeeks
-    );
-  }
-
-  /**
-   * Get title templates based on fitness level and objective
-   */
-  private getTitleTemplates(fitnessLevel: string, objective: string): string[] {
-    const templates = {
-      BEGINNER: {
-        LOSE_FAT: [
-          "Beginner's Fat Loss Journey",
-          "Start Your Weight Loss Transformation",
-          "Foundation Fat Burn Program",
-          "Beginner's Weight Loss Challenge",
-          "Your First Fat Loss Adventure",
-        ],
-        GAIN_MUSCLE: [
-          "Beginner's Muscle Building Program",
-          "Start Building Your Strength",
-          "Foundation Muscle Growth Plan",
-          "Your First Muscle Building Journey",
-          "Beginner's Strength Development",
-        ],
-        ENDURANCE: [
-          "Beginner's Endurance Builder",
-          "Start Your Fitness Journey",
-          "Foundation Cardio Program",
-          "Beginner's Stamina Challenge",
-          "Your First Endurance Adventure",
-        ],
-        MAINTAIN: [
-          "Beginner's Wellness Program",
-          "Start Your Healthy Lifestyle",
-          "Foundation Fitness Plan",
-          "Beginner's Health Journey",
-          "Your First Wellness Program",
-        ],
-      },
-      INTERMEDIATE: {
-        LOSE_FAT: [
-          "Advanced Fat Loss Transformation",
-          "Intermediate Weight Loss Challenge",
-          "Serious Fat Burn Program",
-          "Intermediate Body Recomposition",
-          "Advanced Weight Loss Journey",
-        ],
-        GAIN_MUSCLE: [
-          "Intermediate Muscle Building Program",
-          "Advanced Strength Development",
-          "Serious Muscle Growth Plan",
-          "Intermediate Hypertrophy Program",
-          "Advanced Muscle Building Journey",
-        ],
-        ENDURANCE: [
-          "Intermediate Endurance Challenge",
-          "Advanced Cardio Program",
-          "Serious Stamina Builder",
-          "Intermediate Fitness Challenge",
-          "Advanced Endurance Journey",
-        ],
-        MAINTAIN: [
-          "Intermediate Wellness Program",
-          "Advanced Health Maintenance",
-          "Serious Fitness Plan",
-          "Intermediate Lifestyle Program",
-          "Advanced Wellness Journey",
-        ],
-      },
-      ADVANCED: {
-        LOSE_FAT: [
-          "Elite Fat Loss Program",
-          "Advanced Body Recomposition",
-          "Expert Weight Loss Challenge",
-          "Elite Fat Burn Transformation",
-          "Advanced Fat Loss Mastery",
-        ],
-        GAIN_MUSCLE: [
-          "Elite Muscle Building Program",
-          "Advanced Hypertrophy Challenge",
-          "Expert Strength Development",
-          "Elite Muscle Growth Plan",
-          "Advanced Muscle Mastery",
-        ],
-        ENDURANCE: [
-          "Elite Endurance Program",
-          "Advanced Cardio Challenge",
-          "Expert Stamina Builder",
-          "Elite Fitness Challenge",
-          "Advanced Endurance Mastery",
-        ],
-        MAINTAIN: [
-          "Elite Wellness Program",
-          "Advanced Health Mastery",
-          "Expert Fitness Plan",
-          "Elite Lifestyle Program",
-          "Advanced Wellness Mastery",
-        ],
-      },
-    };
-
-    return (
-      (templates as any)[fitnessLevel]?.[objective] || [
-        `${objective.replace("_", " ")} Training Program`,
-        `${fitnessLevel} ${objective.replace("_", " ")} Program`,
-        "Personalized Training Plan",
-      ]
-    );
-  }
-
-  /**
-   * Select the best template based on user context
-   */
-  private selectBestTemplate(
-    templates: string[],
-    userProfile: UserProfile,
-    goal: Goal,
-    suggestedWeeks: number
-  ): string {
-    // Consider user's health status, age, and plan duration for template selection
-    let selectedTemplate = templates[0]; // Default to first template
-
-    // Health considerations
-    if (userProfile.healthNote) {
-      const healthNote = userProfile.healthNote.toLowerCase();
-      if (healthNote.includes("knee") || healthNote.includes("back")) {
-        // Choose more conservative titles
-        selectedTemplate =
-          templates.find(
-            (t) =>
-              t.toLowerCase().includes("foundation") ||
-              t.toLowerCase().includes("start")
-          ) || templates[0];
-      }
-    }
-
-    // Plan duration considerations
-    if (suggestedWeeks >= 10) {
-      // Longer plans - choose more comprehensive titles
-      selectedTemplate =
-        templates.find(
-          (t) =>
-            t.toLowerCase().includes("journey") ||
-            t.toLowerCase().includes("transformation") ||
-            t.toLowerCase().includes("program")
-        ) || templates[0];
-    } else if (suggestedWeeks <= 6) {
-      // Shorter plans - choose more focused titles
-      selectedTemplate =
-        templates.find(
-          (t) =>
-            t.toLowerCase().includes("challenge") ||
-            t.toLowerCase().includes("start")
-        ) || templates[0];
-    }
-
-    return selectedTemplate;
-  }
-
-  /**
-   * Customize the selected template with user-specific details
-   */
-  private customizeTitle(
-    template: string,
-    userProfile: UserProfile,
-    goal: Goal,
-    suggestedWeeks: number
-  ): string {
-    let customizedTitle = template;
-
-    // Add duration context for longer plans
-    if (suggestedWeeks >= 12) {
-      customizedTitle += ` (${suggestedWeeks}-Week Program)`;
-    } else if (suggestedWeeks >= 8) {
-      customizedTitle += ` (${suggestedWeeks}-Week Challenge)`;
-    }
-
-    // Add frequency context for specific cases
-    if (goal.sessionsPerWeek <= 2) {
-      customizedTitle += " - Low Frequency";
-    } else if (goal.sessionsPerWeek >= 5) {
-      customizedTitle += " - High Frequency";
-    }
-
-    // Add session duration context
-    if (goal.sessionMinutes <= 30) {
-      customizedTitle += " - Quick Sessions";
-    } else if (goal.sessionMinutes >= 90) {
-      customizedTitle += " - Extended Sessions";
-    }
-
-    return customizedTitle;
-  }
-
-  /**
    * Demo function to show how the AI title generation works
    * This can be used for testing and demonstration purposes
    */
@@ -2237,19 +837,15 @@ class WorkoutPlanGeneratorService {
       sessionMinutes,
     };
 
-    const templates = this.getTitleTemplates(fitnessLevel, objective);
-    const selectedTemplate = this.selectBestTemplate(
-      templates,
+    const generatedTitle = planTitleService.generatePlanTitle(
       mockProfile as UserProfile,
       mockGoal as Goal,
       suggestedWeeks
     );
-    const generatedTitle = this.customizeTitle(
-      selectedTemplate,
-      mockProfile as UserProfile,
-      mockGoal as Goal,
-      suggestedWeeks
-    );
+
+    // For demo purposes, we'll extract template info
+    const templates: string[] = [];
+    const selectedTemplate = generatedTitle.split(" (")[0]; // Remove suffix
 
     let customization = "No customization applied";
     if (generatedTitle !== selectedTemplate) {
