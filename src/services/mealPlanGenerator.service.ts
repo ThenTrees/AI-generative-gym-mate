@@ -12,7 +12,7 @@ import {
   NutritionCalculationService,
   NutritionTarget as CalculatedNutritionTarget,
   MealNutrition,
-} from "./nutritionCalculation.service";
+} from "./NutritionCalculation.service";
 import {
   MealContext,
   MealRecommendationService,
