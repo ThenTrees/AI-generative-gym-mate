@@ -93,65 +93,64 @@ export class HealthAnalysisService {
    * Build the prompt for AI health analysis
    */
   private buildHealthAnalysisPrompt(
-    userProfile: UserProfile,
+    profile: UserProfile,
     notes?: string
   ): string {
-    return `Bạn là một chuyên gia về sức khỏe và thể dục. Phân tích thông tin sức khỏe của người dùng và đưa ra các cân nhắc về sức khỏe cho việc tập luyện.
+    return `Ngữ cảnh: Bạn là chuyên gia về sức khỏe và thể dục.
 
-THÔNG TIN NGƯỜI DÙNG:
-- Tuổi: ${userProfile.age || "Không rõ"}
-- Giới tính: ${userProfile.gender || "Không rõ"}
-- Cân nặng: ${userProfile.weight || "Không rõ"} kg
-- Chiều cao: ${userProfile.height || "Không rõ"} cm
-- Ghi chú sức khỏe: ${notes || userProfile.healthNote || "Không có"}
+YÊU CẦU CHUNG:
+- Phân tích "Input" (dòng dưới) và trả về **CHỈ** một JSON array (có thể rỗng []).
+- Mỗi phần tử phải có các trường: "type", "affectedArea", "restrictions", "modifications".
+- Chỉ dùng các giá trị từ danh sách hợp lệ cho "restrictions" và "modifications" (không tạo giá trị mới).
 
-NHIỆM VỤ:
-Phân tích ghi chú sức khỏe và trả về danh sách các cân nhắc về sức khỏe dưới dạng JSON. Mỗi cân nhắc bao gồm:
-- type: "joint_limitation" | "injury_history" | "mobility_issue"
-- affectedArea: vùng cơ thể bị ảnh hưởng (ví dụ: "knee", "spine", "shoulder", "hip", "ankle", "wrist", "neck", "elbow")
-- restrictions: mảng các hạn chế (ví dụ: ["high_impact", "deep_squat", "heavy_loading", "overhead", "jumping", "running"])
-- modifications: mảng các điều chỉnh đề xuất (ví dụ: ["partial_range", "low_impact_alternatives", "neutral_spine", "core_focus"])
+DANH SÁCH HỢP LỆ:
+restrictions: ["high_impact","deep_squat","heavy_loading","spinal_flexion","overhead","internal_rotation","jumping","running","push_up","heavy_pressing","hyperextension"]
+modifications: ["partial_range","low_impact_alternatives","neutral_spine","core_focus","reduced_range","stability_focus","controlled_range","neutral_grip","wrist_support","neutral_position","mobility_focus","supportive_bracing","balance_training"]
 
-CÁC LOẠI HẠN CHẾ PHỔ BIẾN:
-- "high_impact": các bài tập tác động mạnh
-- "deep_squat": squat sâu
-- "heavy_loading": tải trọng nặng
-- "spinal_flexion": gập cột sống
-- "overhead": động tác trên đầu
-- "internal_rotation": xoay trong
-- "jumping": nhảy
-- "running": chạy
-- "push_up": hít đất
-- "heavy_pressing": ép/đẩy nặng
-- "hyperextension": duỗi quá mức
+PHƯƠNG PHÁP (theo bước):
+BƯỚC 1: Trích từ khóa y tế / triệu chứng trong input.
+BƯỚC 2: Xác định vùng bị ảnh hưởng (ví dụ: "knee","spine","shoulder","hip","ankle","wrist","neck","elbow").
+BƯỚC 3: Gán type: "joint_limitation" | "injury_history" | "mobility_issue".
+BƯỚC 4: Map triệu chứng -> restrictions bằng cách dùng danh sách hợp lệ.
+BƯỚC 5: Đề xuất tối đa 4 modifications phù hợp từ danh sách hợp lệ.
+BƯỚC 6: Nếu không tìm thấy vấn đề rõ ràng, trả về [].
 
-CÁC ĐIỀU CHỈNH PHỔ BIẾN:
-- "partial_range": phạm vi chuyển động một phần
-- "low_impact_alternatives": thay thế tác động thấp
-- "neutral_spine": giữ cột sống trung tính
-- "core_focus": tập trung vào cơ core
-- "reduced_range": giảm phạm vi
-- "stability_focus": tập trung vào ổn định
-- "controlled_range": phạm vi có kiểm soát
-- "neutral_grip": nắm trung tính
-- "wrist_support": hỗ trợ cổ tay
-- "neutral_position": vị trí trung tính
-- "mobility_focus": tập trung vào linh hoạt
-- "supportive_bracing": nẹp hỗ trợ
-- "balance_training": tập thăng bằng
+VÍ DỤS:
+Input: "Tôi bị đau khớp gối khi squat sâu"
+Output:
+[
+  {
+    "type": "joint_limitation",
+    "affectedArea": "knee",
+    "restrictions": ["deep_squat","high_impact"],
+    "modifications": ["partial_range","low_impact_alternatives"]
+  }
+]
 
-TRẢ LỜI:
-Chỉ trả về JSON array, không có text giải thích. Nếu không có vấn đề sức khỏe nào được phát hiện, trả về mảng rỗng [].
-
-Ví dụ format:
+Input: "Thoát vị đĩa đệm L4-L5, đau khi gập người"
+Output:
 [
   {
     "type": "injury_history",
-    "affectedArea": "knee",
-    "restrictions": ["high_impact", "deep_squat"],
-    "modifications": ["partial_range", "low_impact_alternatives"]
+    "affectedArea": "spine",
+    "restrictions": ["spinal_flexion","heavy_loading"],
+    "modifications": ["neutral_spine","reduced_range","core_focus"]
   }
-]`;
+]
+
+BÂY GIỜ PHÂN TÍCH THIS CASE:
+User profile:
+- Age: ${profile.age || "Không rõ"}
+- Gender: ${profile.gender || "Không rõ"}
+- Weight: ${profile.weight || "Không rõ"} kg
+- Height: ${profile.height || "Không rõ"} cm
+Notes: "${notes || profile.healthNote || ""}"
+
+QUY TẮC TRẢ VỀ:
+- CHỈ TRẢ VỀ JSON array, KHÔNG có văn bản giải thích.
+- Mọi giá trị trong "restrictions" và "modifications" phải là 1 trong danh sách hợp lệ ở trên.
+- Giới hạn tối đa 6 phần tử trong mảng.
+`;
   }
 
   /**

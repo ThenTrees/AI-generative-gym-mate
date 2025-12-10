@@ -69,17 +69,24 @@ export class ExerciseSelectionService {
     const uniqueExercises = this.removeDuplicateExercises(allExercises);
     const filteredExercises = this.applyExerciseFilters(
       uniqueExercises,
-      strategy
+      strategy,
+      goal
+    );
+
+    // Apply objective-based priority boost and sorting
+    const prioritizedExercises = this.applyObjectivePriorityBoost(
+      filteredExercises,
+      goal.objectiveType
     );
 
     logger.info(
-      `Selected ${filteredExercises.length} exercises from RAG system`
+      `Selected ${prioritizedExercises.length} exercises from RAG system (objective: ${goal.objectiveType})`
     );
-    return filteredExercises;
+    return prioritizedExercises;
   }
 
   /**
-   * Build movement pattern queries for RAG search
+   * Build movement pattern queries for RAG search with objective-specific optimization
    */
   private buildMovementPatternQueries(
     userProfile: UserProfile,
@@ -88,93 +95,142 @@ export class ExerciseSelectionService {
   ): SearchQuery[] {
     const queries: SearchQuery[] = [];
 
-    // Core movement patterns for comprehensive training
-    const movementPatterns = [
+    // Base movement patterns for comprehensive training
+    const baseMovementPatterns = [
       {
         pattern: "squat",
         searchTerms: "squat hip hinge quad glute compound lower body",
-        priority: 1,
-        maxResults: 8,
+        basePriority: 1,
+        baseMaxResults: 8,
       },
       {
         pattern: "hinge",
         searchTerms: "deadlift hinge posterior chain hamstring glute",
-        priority: 1,
-        maxResults: 8,
+        basePriority: 1,
+        baseMaxResults: 8,
       },
       {
         pattern: "lunge",
         searchTerms:
           "lunge split squat unilateral single leg quad glute balance",
-        priority: 2,
-        maxResults: 6,
+        basePriority: 2,
+        baseMaxResults: 6,
       },
       {
         pattern: "push_vertical",
         searchTerms: "press overhead shoulder vertical push",
-        priority: 2,
-        maxResults: 6,
+        basePriority: 2,
+        baseMaxResults: 6,
       },
       {
         pattern: "push_horizontal",
         searchTerms: "press chest horizontal push bench",
-        priority: 1,
-        maxResults: 8,
+        basePriority: 1,
+        baseMaxResults: 8,
       },
       {
         pattern: "pull_vertical",
         searchTerms: "pull up lat pulldown vertical pull back",
-        priority: 1,
-        maxResults: 8,
+        basePriority: 1,
+        baseMaxResults: 8,
       },
       {
         pattern: "pull_horizontal",
         searchTerms: "row pull horizontal back rhomboids",
-        priority: 1,
-        maxResults: 8,
+        basePriority: 1,
+        baseMaxResults: 8,
       },
       {
         pattern: "carry",
         searchTerms: "carry walk farmer core stability",
-        priority: 3,
-        maxResults: 4,
+        basePriority: 3,
+        baseMaxResults: 4,
       },
       {
         pattern: "core",
         searchTerms: "plank core abs stability anti-extension",
-        priority: 2,
-        maxResults: 6,
+        basePriority: 2,
+        baseMaxResults: 6,
       },
       {
         pattern: "rotation",
         searchTerms: "rotation anti-rotation core oblique twist woodchop",
-        priority: 2,
-        maxResults: 6,
+        basePriority: 2,
+        baseMaxResults: 6,
       },
       {
         pattern: "gait",
         searchTerms: "walk run sprint locomotion movement pattern",
-        priority: 3,
-        maxResults: 4,
+        basePriority: 3,
+        baseMaxResults: 4,
       },
     ];
 
-    // Add cardio if weight loss or endurance goal
+    // Apply objective-specific adjustments
+    const movementPatterns = baseMovementPatterns.map((pattern) => {
+      const adjustments = this.getObjectiveAdjustments(
+        goal.objectiveType,
+        pattern.pattern
+      );
+      return {
+        pattern: pattern.pattern,
+        searchTerms: pattern.searchTerms,
+        priority: Math.max(1, pattern.basePriority + adjustments.priorityDelta),
+        maxResults: Math.max(
+          2,
+          pattern.baseMaxResults + adjustments.maxResultsDelta
+        ),
+        objectiveTerms: adjustments.additionalSearchTerms,
+      };
+    });
+
+    // Add objective-specific patterns
     if (
       goal.objectiveType === Objective.LOSE_FAT ||
       goal.objectiveType === Objective.ENDURANCE
     ) {
+      const cardioPriority = goal.objectiveType === Objective.LOSE_FAT ? 1 : 1;
+      const cardioMaxResults =
+        goal.objectiveType === Objective.LOSE_FAT ? 12 : 15;
+
       movementPatterns.push({
         pattern: "cardio",
-        searchTerms: "cardio conditioning metabolic circuit",
-        priority: 1,
-        maxResults: 10,
+        searchTerms:
+          goal.objectiveType === Objective.LOSE_FAT
+            ? "cardio HIIT high intensity interval training metabolic conditioning fat burning"
+            : "cardio endurance aerobic long duration steady state",
+        priority: cardioPriority,
+        maxResults: cardioMaxResults,
+        objectiveTerms: [],
+      });
+    }
+
+    // For GAIN_MUSCLE, add more compound exercise emphasis
+    if (goal.objectiveType === Objective.GAIN_MUSCLE) {
+      // Increase priority for compound movements
+      const compoundPatterns = [
+        "squat",
+        "hinge",
+        "push_horizontal",
+        "pull_vertical",
+        "pull_horizontal",
+      ];
+      movementPatterns.forEach((pattern) => {
+        if (compoundPatterns.includes(pattern.pattern)) {
+          pattern.priority = Math.max(1, pattern.priority - 1); // Lower number = higher priority
+          pattern.maxResults += 2;
+        }
       });
     }
 
     // Build search queries with user context
     for (const pattern of movementPatterns) {
       let searchText = pattern.searchTerms;
+
+      // Add objective-specific terms
+      if (pattern.objectiveTerms.length > 0) {
+        searchText += " " + pattern.objectiveTerms.join(" ");
+      }
 
       // Add user level
       searchText += ` ${userProfile.fitnessLevel.toLowerCase()}`;
@@ -190,8 +246,11 @@ export class ExerciseSelectionService {
         searchText += " gym equipment weights";
       }
 
-      // Add objective context
-      searchText += ` ${goal.objectiveType.toLowerCase().replace("_", " ")}`;
+      // Add objective context with more specific terms
+      const objectiveContext = this.getObjectiveSearchContext(
+        goal.objectiveType
+      );
+      searchText += " " + objectiveContext;
 
       // Add health safety terms
       const searchTerms = this.buildHealthSafetyTerms(
@@ -209,6 +268,125 @@ export class ExerciseSelectionService {
     }
 
     return queries;
+  }
+
+  /**
+   * Get objective-specific adjustments for movement patterns
+   */
+  private getObjectiveAdjustments(
+    objective: Objective,
+    pattern: string
+  ): {
+    priorityDelta: number;
+    maxResultsDelta: number;
+    additionalSearchTerms: string[];
+  } {
+    const adjustments = {
+      priorityDelta: 0,
+      maxResultsDelta: 0,
+      additionalSearchTerms: [] as string[],
+    };
+
+    switch (objective) {
+      case Objective.GAIN_MUSCLE:
+        // Prioritize compound movements
+        if (
+          [
+            "squat",
+            "hinge",
+            "push_horizontal",
+            "pull_vertical",
+            "pull_horizontal",
+          ].includes(pattern)
+        ) {
+          adjustments.priorityDelta = -1; // Higher priority (lower number)
+          adjustments.maxResultsDelta = 2;
+          adjustments.additionalSearchTerms.push(
+            "hypertrophy",
+            "muscle building",
+            "strength"
+          );
+        } else if (["lunge", "push_vertical"].includes(pattern)) {
+          adjustments.priorityDelta = 0;
+          adjustments.maxResultsDelta = 1;
+        } else {
+          adjustments.priorityDelta = 1; // Lower priority
+          adjustments.maxResultsDelta = -2;
+        }
+        break;
+
+      case Objective.LOSE_FAT:
+        // Prioritize cardio and metabolic exercises
+        if (pattern === "cardio" || pattern === "gait") {
+          adjustments.priorityDelta = -2; // Highest priority
+          adjustments.maxResultsDelta = 4;
+          adjustments.additionalSearchTerms.push(
+            "fat burning",
+            "metabolic",
+            "HIIT",
+            "calorie burn"
+          );
+        } else if (
+          ["squat", "hinge", "push_horizontal", "pull_vertical"].includes(
+            pattern
+          )
+        ) {
+          adjustments.priorityDelta = 0;
+          adjustments.maxResultsDelta = 1;
+          adjustments.additionalSearchTerms.push("circuit", "metabolic");
+        } else {
+          adjustments.priorityDelta = 1;
+          adjustments.maxResultsDelta = -1;
+        }
+        break;
+
+      case Objective.ENDURANCE:
+        // Prioritize cardio and high-rep exercises
+        if (pattern === "cardio" || pattern === "gait") {
+          adjustments.priorityDelta = -2;
+          adjustments.maxResultsDelta = 5;
+          adjustments.additionalSearchTerms.push(
+            "aerobic",
+            "endurance",
+            "steady state",
+            "long duration"
+          );
+        } else if (["core", "rotation"].includes(pattern)) {
+          adjustments.priorityDelta = -1;
+          adjustments.maxResultsDelta = 2;
+          adjustments.additionalSearchTerms.push("endurance", "high reps");
+        } else {
+          adjustments.priorityDelta = 0;
+          adjustments.maxResultsDelta = 1;
+          adjustments.additionalSearchTerms.push("endurance", "light weight");
+        }
+        break;
+
+      case Objective.MAINTAIN:
+        // Balanced approach
+        adjustments.priorityDelta = 0;
+        adjustments.maxResultsDelta = 0;
+        adjustments.additionalSearchTerms.push("maintenance", "balanced");
+        break;
+    }
+
+    return adjustments;
+  }
+
+  /**
+   * Get objective-specific search context terms
+   */
+  private getObjectiveSearchContext(objective: Objective): string {
+    switch (objective) {
+      case Objective.GAIN_MUSCLE:
+        return "muscle building hypertrophy strength training compound";
+      case Objective.LOSE_FAT:
+        return "fat loss weight loss calorie burn metabolic HIIT";
+      case Objective.ENDURANCE:
+        return "endurance stamina aerobic cardiovascular";
+      case Objective.MAINTAIN:
+        return "maintenance health fitness balanced";
+    }
   }
 
   /**
@@ -283,11 +461,12 @@ export class ExerciseSelectionService {
   }
 
   /**
-   * Apply filters to exercises based on strategy
+   * Apply filters to exercises based on strategy and goal
    */
   private applyExerciseFilters(
     exercises: ExerciseWithScore[],
-    strategy: PlanStrategy
+    strategy: PlanStrategy,
+    goal: Goal
   ): ExerciseWithScore[] {
     return exercises.filter((exerciseData) => {
       const { exercise } = exerciseData;
@@ -319,8 +498,287 @@ export class ExerciseSelectionService {
         }
       }
 
+      // Objective-based category filter
+      if (!this.matchesObjectiveCategory(exercise, goal.objectiveType)) {
+        return false;
+      }
+
       return true;
     });
+  }
+
+  /**
+   * Check if exercise category and type match objective requirements
+   */
+  private matchesObjectiveCategory(
+    exercise: Exercise,
+    objective: Objective
+  ): boolean {
+    const category = exercise.exerciseCategory.code.toLowerCase();
+    const exerciseType = exercise.exerciseType?.toUpperCase() || "";
+    const exerciseName = exercise.name.toLowerCase();
+    const tags = exercise.tags?.join(" ").toLowerCase() || "";
+
+    switch (objective) {
+      case Objective.GAIN_MUSCLE:
+        // Prefer strength exercises with compound/freeweight/machine types
+        // Allow some cardio for conditioning (HIIT/metabolic only)
+        if (category === "cardio" || exerciseType === "CARDIO") {
+          // Only allow cardio if it's HIIT or metabolic (not pure endurance)
+          return (
+            exerciseName.includes("hiit") ||
+            exerciseName.includes("circuit") ||
+            exerciseName.includes("metabolic") ||
+            exerciseName.includes("sprint") ||
+            tags.includes("hiit") ||
+            tags.includes("metabolic")
+          );
+        }
+        // Prefer strength category with compound/freeweight/machine types
+        if (category === "strength") {
+          return (
+            exerciseType === "COMPOUND" ||
+            exerciseType === "FREEWEIGHT" ||
+            exerciseType === "MACHINE" ||
+            exerciseType === "ISOLATION" ||
+            exerciseName.includes("compound") ||
+            tags.includes("compound")
+          );
+        }
+        // Allow plyometrics for power development
+        if (category === "plyometrics" || exerciseType === "PLYOMETRIC") {
+          return true;
+        }
+        return false;
+
+      case Objective.LOSE_FAT:
+        // Prefer cardio, plyometric, and bodyweight exercises
+        if (category === "cardio" || exerciseType === "CARDIO") {
+          return true; // All cardio is good for fat loss
+        }
+        // Plyometric exercises are excellent for fat loss
+        if (category === "plyometrics" || exerciseType === "PLYOMETRIC") {
+          return true;
+        }
+        // Bodyweight exercises for metabolic conditioning
+        if (exerciseType === "BODYWEIGHT") {
+          return true;
+        }
+        // Strength exercises are also good, especially compound
+        if (category === "strength") {
+          return (
+            exerciseType === "COMPOUND" ||
+            exerciseType === "FREEWEIGHT" ||
+            exerciseName.includes("compound") ||
+            exerciseName.includes("squat") ||
+            exerciseName.includes("deadlift") ||
+            exerciseName.includes("press") ||
+            tags.includes("compound")
+          );
+        }
+        // Core exercises for stability and metabolic benefit
+        if (category === "core") {
+          return true;
+        }
+        return false;
+
+      case Objective.ENDURANCE:
+        // Strongly prefer cardio and bodyweight exercises
+        if (category === "cardio" || exerciseType === "CARDIO") {
+          return true;
+        }
+        // Bodyweight exercises for muscular endurance
+        if (exerciseType === "BODYWEIGHT") {
+          return true;
+        }
+        // Allow strength if it's endurance-focused (high reps, light weight)
+        if (category === "strength") {
+          return (
+            exerciseType === "BODYWEIGHT" ||
+            exerciseName.includes("endurance") ||
+            exerciseName.includes("circuit") ||
+            tags.includes("endurance") ||
+            tags.includes("aerobic")
+          );
+        }
+        // Core exercises for stability endurance
+        if (category === "core") {
+          return true;
+        }
+        return false;
+
+      case Objective.MAINTAIN:
+        // Accept all categories and types for maintenance
+        return true;
+
+      default:
+        return true;
+    }
+  }
+
+  /**
+   * Apply objective-based priority boost to exercises using both category and type
+   */
+  private applyObjectivePriorityBoost(
+    exercises: ExerciseWithScore[],
+    objective: Objective
+  ): ExerciseWithScore[] {
+    return exercises
+      .map((exerciseData) => {
+        let priorityBoost = 0;
+        const { exercise } = exerciseData;
+        const category = exercise.exerciseCategory.code.toLowerCase();
+        const exerciseType = exercise.exerciseType?.toUpperCase() || "";
+        const exerciseName = exercise.name.toLowerCase();
+        const tags = exercise.tags?.join(" ").toLowerCase() || "";
+
+        switch (objective) {
+          case Objective.GAIN_MUSCLE:
+            // Highest priority: Compound exercises (COMPOUND type or compound movements)
+            if (
+              exerciseType === "COMPOUND" ||
+              exerciseName.includes("squat") ||
+              exerciseName.includes("deadlift") ||
+              exerciseName.includes("bench press") ||
+              exerciseName.includes("overhead press") ||
+              exerciseName.includes("row") ||
+              exerciseName.includes("pull-up") ||
+              tags.includes("compound")
+            ) {
+              priorityBoost = -3; // Highest priority
+            }
+            // High priority: Freeweight and Machine strength exercises
+            else if (
+              (category === "strength" &&
+                (exerciseType === "FREEWEIGHT" ||
+                  exerciseType === "MACHINE")) ||
+              exerciseType === "ISOLATION"
+            ) {
+              priorityBoost = -2;
+            }
+            // Medium priority: Other strength exercises
+            else if (category === "strength") {
+              priorityBoost = -1;
+            }
+            // Lower priority: Plyometric for power (still useful)
+            else if (
+              category === "plyometrics" ||
+              exerciseType === "PLYOMETRIC"
+            ) {
+              priorityBoost = 0;
+            }
+            // Lowest priority: Cardio (only for conditioning)
+            else if (category === "cardio" || exerciseType === "CARDIO") {
+              priorityBoost = 2;
+            }
+            break;
+
+          case Objective.LOSE_FAT:
+            // Highest priority: Cardio and Plyometric exercises
+            if (
+              category === "cardio" ||
+              exerciseType === "CARDIO" ||
+              category === "plyometrics" ||
+              exerciseType === "PLYOMETRIC" ||
+              exerciseName.includes("hiit") ||
+              exerciseName.includes("circuit") ||
+              exerciseName.includes("metabolic") ||
+              exerciseName.includes("sprint") ||
+              exerciseName.includes("burpee") ||
+              exerciseName.includes("jump") ||
+              tags.includes("fat burning") ||
+              tags.includes("metabolic") ||
+              tags.includes("hiit")
+            ) {
+              priorityBoost = -4; // Highest priority
+            }
+            // High priority: Bodyweight exercises (metabolic benefit)
+            else if (exerciseType === "BODYWEIGHT") {
+              priorityBoost = -2;
+            }
+            // Medium priority: Compound strength exercises
+            else if (
+              exerciseType === "COMPOUND" ||
+              exerciseName.includes("squat") ||
+              exerciseName.includes("deadlift") ||
+              exerciseName.includes("burpee") ||
+              tags.includes("compound")
+            ) {
+              priorityBoost = -1;
+            }
+            // Lower priority: Other strength exercises
+            else if (category === "strength") {
+              priorityBoost = 0;
+            }
+            // Core exercises for stability
+            else if (category === "core") {
+              priorityBoost = -1;
+            }
+            break;
+
+          case Objective.ENDURANCE:
+            // Highest priority: Cardio exercises
+            if (
+              category === "cardio" ||
+              exerciseType === "CARDIO" ||
+              exerciseName.includes("run") ||
+              exerciseName.includes("bike") ||
+              exerciseName.includes("row") ||
+              exerciseName.includes("swim") ||
+              tags.includes("endurance") ||
+              tags.includes("aerobic")
+            ) {
+              priorityBoost = -4; // Highest priority
+            }
+            // High priority: Bodyweight exercises for muscular endurance
+            else if (exerciseType === "BODYWEIGHT") {
+              priorityBoost = -2;
+            }
+            // Medium priority: Endurance-focused strength exercises
+            else if (
+              tags.includes("endurance") ||
+              exerciseName.includes("circuit") ||
+              (category === "strength" &&
+                (exerciseType === "BODYWEIGHT" ||
+                  exerciseName.includes("endurance")))
+            ) {
+              priorityBoost = -1;
+            }
+            // Core exercises for stability endurance
+            else if (category === "core") {
+              priorityBoost = -1;
+            }
+            // Lower priority: Pure strength training
+            else if (category === "strength" && exerciseType === "COMPOUND") {
+              priorityBoost = 1;
+            } else if (category === "strength") {
+              priorityBoost = 2;
+            }
+            break;
+
+          case Objective.MAINTAIN:
+            // Balanced approach, slight preference for compound and bodyweight
+            if (exerciseType === "COMPOUND" || exerciseType === "BODYWEIGHT") {
+              priorityBoost = -1;
+            } else {
+              priorityBoost = 0;
+            }
+            break;
+        }
+
+        return {
+          ...exerciseData,
+          priority: Math.max(1, exerciseData.priority + priorityBoost),
+        };
+      })
+      .sort((a, b) => {
+        // Sort by priority first (lower number = higher priority)
+        const priorityDiff = a.priority - b.priority;
+        if (priorityDiff !== 0) return priorityDiff;
+
+        // Then by similarity score
+        return b.similarityScore - a.similarityScore;
+      });
   }
 
   /**

@@ -90,24 +90,17 @@ export class MealPlanGenerator {
     );
 
     // get meal plan for current day by userId
-
     const mealPlanResult = await this.getMealPlanByUserIdAndPlanDate(
       userId,
       transferDate
     );
-    return {
-      ...mealPlanResult,
-      targetNutrition: {
-        calories: nutritionTarget.targetCalories,
-        protein: nutritionTarget.macros.proteinG,
-        carbs: nutritionTarget.macros.carbsG,
-        fat: nutritionTarget.macros.fatG,
-        caloriesForBreakfast: nutritionTarget.caloriesForBreakfast,
-        caloriesForLunch: nutritionTarget.caloriesForLunch,
-        caloriesForDinner: nutritionTarget.caloriesForDiner,
-        isTrainingDay: nutritionTarget.isTraining,
-      },
-    };
+
+    // Return unified response shape
+    return this.buildUnifiedResponse(
+      mealPlanResult,
+      nutritionTarget,
+      transferDate
+    );
   }
 
   /**
@@ -218,86 +211,122 @@ export class MealPlanGenerator {
       planDateTransfer
     );
 
-    const meals: any = {};
     // check meal plan already exist
     if (mealPlanExist) {
-      return {
-        ...mealPlanExist,
-        targetNutrition: {
-          calories: nutritionTarget.targetCalories,
-          protein: nutritionTarget.macros.proteinG,
-          carbs: nutritionTarget.macros.carbsG,
-          fat: nutritionTarget.macros.fatG,
-          caloriesForBreakfast: nutritionTarget.caloriesForBreakfast,
-          caloriesForLunch: nutritionTarget.caloriesForLunch,
-          caloriesForDinner: nutritionTarget.caloriesForDiner,
-        },
-      };
-    } else {
-      /**
-       * Generate meal recommendations for each meal time
-       */
-      for (const mealTime of mealTimes) {
-        const mealNutrition =
-          this.nutritionCalculationService.calculateMealNutrition(
-            nutritionTarget,
-            mealTime.defaultCaloriePercentage
-          );
-
-        meals[mealTime.code] = await this.generateMealRecommendations(
-          mealTime,
-          mealNutrition.calories,
-          mealNutrition.protein,
-          mealNutrition.carbs,
-          mealNutrition.fat,
-          goal.objectiveType,
-          isTrainingDay,
-          userId,
-          profile.weightKg,
-          profile.heightCm,
-          profile.gender
-        );
-      }
-
-      // Save to database
-      const mealPlanId = await this.saveMealPlan(
-        {
-          userId,
-          planDate,
-          totalCalories: 0,
-          totalProtein: 0,
-          totalCarbs: 0,
-          totalFat: 0,
-          isTrainingDay,
-          baseCalories: nutritionTarget.tdee,
-          workoutAdjustment: workoutCalories,
-        },
-        meals,
-        mealTimes
+      // Return unified response shape
+      return this.buildUnifiedResponse(
+        mealPlanExist,
+        nutritionTarget,
+        planDateTransfer
       );
-
-      return {
-        mealPlanId: mealPlanId,
-        planDate: planDateTransfer,
-        isTrainingDay,
-        meals,
-        actualNutrition: {
-          calories: 0,
-          protein: 0,
-          carbs: 0,
-          fat: 0,
-        },
-        targetNutrition: {
-          calories: nutritionTarget.targetCalories,
-          protein: nutritionTarget.macros.proteinG,
-          carbs: nutritionTarget.macros.carbsG,
-          fat: nutritionTarget.macros.fatG,
-          caloriesForBreakfast: nutritionTarget.caloriesForBreakfast,
-          caloriesForLunch: nutritionTarget.caloriesForLunch,
-          caloriesForDinner: nutritionTarget.caloriesForDiner,
-        },
-      };
     }
+
+    /**
+     * Generate meal recommendations for each meal time
+     */
+    const meals: any = {};
+    for (const mealTime of mealTimes) {
+      const mealNutrition =
+        this.nutritionCalculationService.calculateMealNutrition(
+          nutritionTarget,
+          mealTime.defaultCaloriePercentage
+        );
+
+      meals[mealTime.code] = await this.generateMealRecommendations(
+        mealTime,
+        mealNutrition.calories,
+        mealNutrition.protein,
+        mealNutrition.carbs,
+        mealNutrition.fat,
+        goal.objectiveType,
+        isTrainingDay,
+        userId,
+        profile.weightKg,
+        profile.heightCm,
+        profile.gender
+      );
+    }
+
+    // ✅ Enforce white rice rule: bữa trưa luôn có cơm HOẶC cách 1 bữa phải có cơm trắng
+    await this.enforceWhiteRiceRule(meals, mealTimes, nutritionTarget);
+
+    // Save to database
+    const mealPlanId = await this.saveMealPlan(
+      {
+        userId,
+        planDate,
+        totalCalories: 0,
+        totalProtein: 0,
+        totalCarbs: 0,
+        totalFat: 0,
+        isTrainingDay,
+        baseCalories: nutritionTarget.tdee,
+        workoutAdjustment: workoutCalories,
+      },
+      meals,
+      mealTimes
+    );
+
+    // Format response to match existing plan response shape
+    const formattedMeals: any = {};
+    for (const mealTime of mealTimes) {
+      const mealFoods = meals[mealTime.code] || [];
+      formattedMeals[mealTime.code] = mealFoods.map(
+        (food: FoodRecommendation, index: number) => {
+          const multiplier = food.servingSuggestion / 100;
+          return {
+            mealTimeId: mealTime.id,
+            servings: food.servingSuggestion,
+            completed: false,
+            displayOrder: index,
+            nutrition: {
+              calories: Math.round(food.calories * multiplier),
+              protein: Math.round(food.protein * multiplier * 10) / 10,
+              carbs: Math.round(food.carbs * multiplier * 10) / 10,
+              fat: Math.round(food.fat * multiplier * 10) / 10,
+            },
+            food: {
+              id: food.id || "",
+              name: food.foodName || "",
+              nameVi: food.foodNameVi || food.foodName || "",
+              description: food.description,
+              commonCombinations: food.commonCombinations,
+              calories: food.calories,
+              protein: food.protein,
+              carbs: food.carbs,
+              fat: food.fat,
+              fiber: food.fiber,
+              category: food.category,
+              image: food.imageUrl,
+              benefits: food.detailedBenefits,
+            },
+          };
+        }
+      );
+    }
+
+    return {
+      mealPlanId: mealPlanId,
+      planDate: planDateTransfer,
+      isTrainingDay,
+      meals: formattedMeals,
+      actualNutrition: {
+        calories: 0,
+        protein: 0,
+        carbs: 0,
+        fat: 0,
+      },
+      targetNutrition: {
+        calories: nutritionTarget.targetCalories,
+        protein: nutritionTarget.macros.proteinG,
+        carbs: nutritionTarget.macros.carbsG,
+        fat: nutritionTarget.macros.fatG,
+        caloriesForBreakfast: nutritionTarget.caloriesForBreakfast,
+        caloriesForLunch: nutritionTarget.caloriesForLunch,
+        caloriesForDinner: nutritionTarget.caloriesForDiner,
+        isTrainingDay: nutritionTarget.isTraining,
+      },
+    };
   }
 
   // link to meal plan => update macro
@@ -969,6 +998,302 @@ export class MealPlanGenerator {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * ✅ Build unified response shape for both new and existing meal plans
+   */
+  private buildUnifiedResponse(
+    mealPlanResult: any,
+    nutritionTarget: any,
+    planDate: string
+  ) {
+    if (!mealPlanResult) {
+      return null;
+    }
+
+    return {
+      mealPlanId: mealPlanResult.mealPlanId,
+      planDate: planDate,
+      isTrainingDay: mealPlanResult.isTrainingDay,
+      meals: mealPlanResult.meals,
+      actualNutrition: mealPlanResult.actualNutrition || {
+        calories: 0,
+        protein: 0,
+        carbs: 0,
+        fat: 0,
+      },
+      targetNutrition: {
+        calories: nutritionTarget.targetCalories,
+        protein: nutritionTarget.macros.proteinG,
+        carbs: nutritionTarget.macros.carbsG,
+        fat: nutritionTarget.macros.fatG,
+        caloriesForBreakfast: nutritionTarget.caloriesForBreakfast,
+        caloriesForLunch: nutritionTarget.caloriesForLunch,
+        caloriesForDinner: nutritionTarget.caloriesForDiner,
+        isTrainingDay: nutritionTarget.isTraining,
+      },
+    };
+  }
+
+  /**
+   * ✅ Enforce business rule: Bữa trưa luôn có cơm HOẶC cách 1 bữa phải có cơm trắng
+   * Priority: Lunch > Dinner > Breakfast
+   */
+  private async enforceWhiteRiceRule(
+    meals: any,
+    mealTimes: MealTime[],
+    nutritionTarget: any
+  ): Promise<void> {
+    logger.info("🍚 Checking white rice rule...");
+
+    // Find meal time codes
+    const lunchCode = mealTimes.find((mt) => mt.code === "LUNCH")?.code;
+    const dinnerCode = mealTimes.find((mt) => mt.code === "DINNER")?.code;
+    const breakfastCode = mealTimes.find((mt) => mt.code === "BREAKFAST")?.code;
+
+    // Check if white rice exists in any meal
+    const hasRiceInLunch = this.hasWhiteRice(meals[lunchCode || ""] || []);
+    const hasRiceInDinner = this.hasWhiteRice(meals[dinnerCode || ""] || []);
+    const hasRiceInBreakfast = this.hasWhiteRice(
+      meals[breakfastCode || ""] || []
+    );
+
+    const hasRiceInAnyMeal =
+      hasRiceInLunch || hasRiceInDinner || hasRiceInBreakfast;
+
+    if (hasRiceInAnyMeal) {
+      logger.info("✅ White rice already present in meal plan");
+      return;
+    }
+
+    logger.info(
+      "⚠️ No white rice found in meal plan. Enforcing white rice rule..."
+    );
+
+    // Priority: Add rice to lunch first, then dinner, then breakfast
+    const priorityMeals = [
+      { code: lunchCode, name: "Lunch" },
+      { code: dinnerCode, name: "Dinner" },
+      { code: breakfastCode, name: "Breakfast" },
+    ];
+
+    for (const meal of priorityMeals) {
+      if (!meal.code || !meals[meal.code]) continue;
+
+      // Find white rice
+      const whiteRice = await this.findWhiteRice();
+      if (!whiteRice) {
+        logger.warn("⚠️ White rice not found in database!");
+        break;
+      }
+
+      // Calculate appropriate serving for rice
+      const mealTimeObj = mealTimes.find((mt) => mt.code === meal.code);
+      if (!mealTimeObj) continue;
+
+      const mealNutrition =
+        this.nutritionCalculationService.calculateMealNutrition(
+          nutritionTarget,
+          mealTimeObj.defaultCaloriePercentage
+        );
+
+      // Rice should provide about 40-50% of meal carbs
+      const targetRiceCarbs = mealNutrition.carbs * 0.45;
+      const riceServings = Math.round(
+        (targetRiceCarbs / whiteRice.carbs) * 100
+      );
+
+      // Find a non-rice carb item to replace
+      const mealItems = meals[meal.code];
+      const replaceIndex = this.findCarbItemToReplace(mealItems);
+
+      if (replaceIndex >= 0) {
+        // Replace existing carb with rice
+        const multiplier = riceServings / 100;
+        mealItems[replaceIndex] = {
+          ...whiteRice,
+          servingSuggestion: riceServings,
+          score: 100, // High score to ensure it stays
+          reason: "Cơm trắng (theo quy tắc dinh dưỡng)",
+          targetCalories: Math.round(whiteRice.calories * multiplier),
+        };
+        logger.info(
+          `✅ Replaced item at position ${replaceIndex} in ${meal.name} with white rice (${riceServings}g)`
+        );
+        break; // Only add rice to one meal
+      } else if (mealItems.length < 6) {
+        // Or add as new item if meal has space
+        const multiplier = riceServings / 100;
+        mealItems.push({
+          ...whiteRice,
+          servingSuggestion: riceServings,
+          score: 100,
+          reason: "Cơm trắng (theo quy tắc dinh dưỡng)",
+          targetCalories: Math.round(whiteRice.calories * multiplier),
+        });
+        logger.info(`✅ Added white rice to ${meal.name} (${riceServings}g)`);
+        break;
+      }
+    }
+  }
+
+  /**
+   * Check if meal contains white rice
+   */
+  private hasWhiteRice(mealItems: any[]): boolean {
+    if (!mealItems || mealItems.length === 0) return false;
+
+    return mealItems.some((item) => {
+      const foodName = (
+        item.foodNameVi ||
+        item.foodName ||
+        item.food?.nameVi ||
+        item.food?.name ||
+        ""
+      ).toLowerCase();
+
+      return (
+        foodName.includes("cơm trắng") ||
+        foodName.includes("cơm gạo") ||
+        (foodName.includes("cơm") &&
+          !foodName.includes("cơm chiên") &&
+          !foodName.includes("cơm rang") &&
+          !foodName.includes("cơm gà"))
+      );
+    });
+  }
+
+  /**
+   * Find white rice from database
+   */
+  private async findWhiteRice(): Promise<Food | null> {
+    try {
+      const result = await this.pool.query(
+        `
+        SELECT 
+          id,
+          food_name as "foodName",
+          food_name_vi as "foodNameVi",
+          description,
+          serving_weight_grams as "servingWeightGrams",
+          calories,
+          protein,
+          carbs,
+          fat,
+          fiber,
+          category,
+          meal_time as "mealTime",
+          image_url as "imageUrl",
+          detailed_benefits as "detailedBenefits",
+          common_combinations as "commonCombinations"
+        FROM foods
+        WHERE (LOWER(food_name_vi) LIKE '%cơm trắng%' 
+           OR LOWER(food_name_vi) LIKE '%cơm gạo%'
+           OR LOWER(food_name) LIKE '%white rice%'
+           OR LOWER(food_name) LIKE '%steamed rice%')
+        AND LOWER(food_name_vi) NOT LIKE '%chiên%'
+        AND LOWER(food_name_vi) NOT LIKE '%rang%'
+        LIMIT 1
+      `
+      );
+
+      if (result.rows.length > 0) {
+        return result.rows[0];
+      }
+
+      // Fallback: find any rice
+      const fallbackResult = await this.pool.query(
+        `
+        SELECT 
+          id,
+          food_name as "foodName",
+          food_name_vi as "foodNameVi",
+          description,
+          serving_weight_grams as "servingWeightGrams",
+          calories,
+          protein,
+          carbs,
+          fat,
+          fiber,
+          category,
+          meal_time as "mealTime",
+          image_url as "imageUrl",
+          detailed_benefits as "detailedBenefits",
+          common_combinations as "commonCombinations"
+        FROM foods
+        WHERE LOWER(food_name_vi) LIKE '%cơm%'
+        AND category IN ('carbs', 'carb', 'carbohydrate')
+        LIMIT 1
+      `
+      );
+
+      return fallbackResult.rows.length > 0 ? fallbackResult.rows[0] : null;
+    } catch (error) {
+      logger.error("Error finding white rice:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Find a carb item (not rice) to replace with white rice
+   * Priority: Replace items with lowest score, avoid protein/vegetables
+   */
+  private findCarbItemToReplace(mealItems: any[]): number {
+    if (!mealItems || mealItems.length === 0) return -1;
+
+    // Find carb items that are not already rice
+    const carbItems = mealItems
+      .map((item, index) => {
+        const category = (item.category || "").toLowerCase();
+        const foodName = (item.foodNameVi || item.foodName || "").toLowerCase();
+        const isCarb =
+          category === "carbs" ||
+          category === "carb" ||
+          foodName.includes("bánh") ||
+          foodName.includes("khoai");
+        const isAlreadyRice =
+          foodName.includes("cơm") || foodName.includes("rice");
+
+        return {
+          index,
+          isCarb,
+          isAlreadyRice,
+          score: item.score || 0,
+          item,
+        };
+      })
+      .filter((x) => x.isCarb && !x.isAlreadyRice);
+
+    if (carbItems.length === 0) {
+      // If no carb items, replace lowest scored non-protein item
+      const nonProteinItems = mealItems
+        .map((item, index) => ({
+          index,
+          category: (item.category || "").toLowerCase(),
+          score: item.score || 0,
+        }))
+        .filter((x) => x.category !== "protein" && x.category !== "vegetables");
+
+      if (nonProteinItems.length > 0) {
+        const lowest = nonProteinItems.sort((a, b) => a.score - b.score)[0];
+        return lowest.index;
+      }
+
+      // Last resort: replace lowest scored item
+      const sortedByScore = mealItems
+        .map((item, index) => ({
+          index,
+          score: item.score || 0,
+        }))
+        .sort((a, b) => a.score - b.score);
+
+      return sortedByScore.length > 0 ? sortedByScore[0].index : -1;
+    }
+
+    // Replace lowest scored carb item
+    const lowestCarb = carbItems.sort((a, b) => a.score - b.score)[0];
+    return lowestCarb.index;
   }
 }
 
