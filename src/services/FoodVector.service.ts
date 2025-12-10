@@ -2,12 +2,12 @@ import { Pool, types } from "pg";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { DATABASE_CONFIG } from "../configs/database";
 import { logger } from "../utils/logger";
-import { config } from "../configs/environment";
+import { loadConfig } from "../configs/environment";
 import { FoodLoader } from "../loaders/foodLoader";
 import { Food } from "../types/model/food";
 import { NutritionTarget } from "../types/model/nutritionTarget";
 import { PgVectorService } from "./pgVector.service";
-
+const config = loadConfig();
 export interface FoodEmbeddingDocument {
   id: string;
   foodId: string;

@@ -1,8 +1,8 @@
-import { PlanRequest } from "../types/request/planRequest";
-import SuccessResponse from "../types/response/success.response";
 import { Request, Response, NextFunction } from "express";
 import { logger } from "../utils/logger";
-import WorkoutPlanGeneratorService from "../services/workoutPlanGenerator.service";
+import { sendError, sendSuccess } from "../utils/response";
+import { PlanRequest } from "../types/request/planRequest";
+import workoutPlanGeneratorService from "../services/WorkoutPlanGenerator.service";
 
 class GymPlanController {
   constructor() {
@@ -22,7 +22,7 @@ class GymPlanController {
         `[Controller] - Generating workout plan for user ${planRequest.userId}`
       );
       const startTime = Date.now();
-      const workoutPlan = await WorkoutPlanGeneratorService.generateWorkoutPlan(
+      const workoutPlan = await workoutPlanGeneratorService.generateWorkoutPlan(
         planRequest
       );
       const generationTime = Date.now() - startTime;
@@ -37,26 +37,27 @@ class GymPlanController {
           60
       );
 
-      new SuccessResponse({
-        message: `Successfully generated ${workoutPlan.planDays.length} - day workout plan`,
-        statusCode: 201,
-        metadata: {
-          workoutPlan: workoutPlan,
+      sendSuccess(
+        res,
+        `Successfully generated ${workoutPlan.planDays.length}-day workout plan`,
+        {
+          workoutPlan,
           startTime,
           generationTime,
           totalExercises,
           avgSessionDuration,
         },
-      }).send(res);
+        201
+      );
     } catch (error) {
       logger.error("Workout plan generation error:", error);
 
-      res.status(500).json({
-        success: false,
-        error: "Failed to generate workout plan",
-        details:
-          error instanceof Error ? error.message : "Unknown error occurred",
-      });
+      sendError(
+        res,
+        "Failed to generate workout plan",
+        500,
+        error instanceof Error ? error.message : "Unknown error occurred"
+      );
     }
   };
 
@@ -64,12 +65,7 @@ class GymPlanController {
   getWorkoutPlan = async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Your logic here
-      new SuccessResponse({
-        message: "Workout plan retrieved successfully",
-        metadata: {
-          /* your data */
-        },
-      }).send(res);
+      sendSuccess(res, "Workout plan retrieved successfully", {});
     } catch (error) {
       next(error);
     }

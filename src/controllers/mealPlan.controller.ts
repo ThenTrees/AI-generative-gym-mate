@@ -1,6 +1,7 @@
-import { mealPlanGenerator } from "../services/mealPlanGenerator.service";
 import { NextFunction, Request, Response } from "express";
+import { mealPlanGenerator } from "../services/mealPlanGenerator.service";
 import { logger } from "../utils/logger";
+import { sendError, sendSuccess } from "../utils/response";
 class MealPlanController {
   constructor() {}
 
@@ -17,17 +18,11 @@ class MealPlanController {
         new Date(date || Date.now())
       );
 
-      res.json({
-        success: true,
-        data: mealPlan,
-      });
+      sendSuccess(res, "Meal plan generated", mealPlan);
     } catch (error: any) {
       logger.error("generation meal plan error:", error);
 
-      res.status(500).json({
-        success: false,
-        error: error.message,
-      });
+      sendError(res, "Failed to generate meal plan", 500, error.message);
     }
   };
 
@@ -39,16 +34,11 @@ class MealPlanController {
         mealPlanItemId,
         completed
       );
-      res.json({
-        success: true,
-      });
+      sendSuccess(res, "Meal plan item updated");
     } catch (error: any) {
       logger.error("meal plan item completed error:", error);
 
-      res.status(500).json({
-        success: false,
-        error: error.message,
-      });
+      sendError(res, "Failed to update meal plan item", 500, error.message);
     }
   };
 
@@ -61,17 +51,11 @@ class MealPlanController {
         foodId,
         servings
       );
-      res.json({
-        success: true,
-        message: "add food to meal plan successfully!",
-      });
+      sendSuccess(res, "Added food to meal plan successfully!");
     } catch (error: any) {
       logger.error("add food to meal plan error:", error);
 
-      res.status(500).json({
-        success: false,
-        error: error.message,
-      });
+      sendError(res, "Failed to add food to meal plan", 500, error.message);
     }
   };
 
@@ -82,17 +66,11 @@ class MealPlanController {
         userId,
         new Date(date || Date.now())
       );
-      res.json({
-        success: true,
-        data: mealPlan,
-      });
+      sendSuccess(res, "Meal plan retrieved", mealPlan);
     } catch (error: any) {
       logger.error("get meal plan date error:", error);
 
-      res.status(500).json({
-        success: false,
-        error: error.message,
-      });
+      sendError(res, "Failed to retrieve meal plan", 500, error.message);
     }
   };
 }

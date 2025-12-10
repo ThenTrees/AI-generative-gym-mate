@@ -1,6 +1,7 @@
-import { logger } from "./utils/logger";
-import { pgVectorService } from "./services/pgVector.service";
 import * as cron from "node-cron";
+import { logger } from "./utils/logger";
+import { validateConfig } from "./configs/environment";
+import { pgVectorService } from "./services/pgVector.service";
 import { foodVectorService } from "./services/foodVector.service";
 import { knowledgeVectorService } from "./services/knowledgeVector.service";
 
@@ -8,6 +9,9 @@ class RAGApplication {
   async initialize() {
     logger.info("Starting RAG Application ...");
     try {
+      // Validate environment upfront
+      validateConfig();
+
       // Init vector service (tables, clients, embeddings model)
       await pgVectorService.initialize();
       await foodVectorService.initialize();

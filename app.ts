@@ -18,8 +18,11 @@ app.use(express.json({ limit: "1mb" }));
 app.use(rateLimit({ windowMs: 60_000, max: 60 }));
 app.use(detailedColoredLogger);
 
-app.use(errorMiddleware);
 app.use("/", routes);
+
+// Error middleware should be last
+app.use(errorMiddleware);
+
 const ragApp = new RAGApplication();
 ragApp.initialize().then(() => {
   logger.info("RAG Application initialized");

@@ -5,7 +5,8 @@ import { Exercise } from "../types/model/exercise.model";
 import { ExerciseLoader } from "../loaders/exerciseLoader";
 import { EmbeddingDocument } from "../types/model/embeddingDocument.model";
 import { logger } from "../utils/logger";
-import { config } from "../configs/environment";
+import { loadConfig } from "../configs/environment";
+const config = loadConfig();
 types.setTypeParser(1082, (val) => val);
 export class PgVectorService {
   private pool: Pool;

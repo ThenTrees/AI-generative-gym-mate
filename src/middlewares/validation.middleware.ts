@@ -1,6 +1,8 @@
 import { rateLimit } from "express-rate-limit";
 import { Request, Response, NextFunction } from "express";
-import { config } from "../configs/environment";
+import { loadConfig } from "../configs/environment";
+
+const config = loadConfig();
 
 export const rateLimiter = rateLimit({
   windowMs: config.api.rateLimit.windowMs,

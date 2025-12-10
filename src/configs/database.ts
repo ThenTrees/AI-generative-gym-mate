@@ -1,8 +1,11 @@
 import fs from "fs";
 import dotenv from "dotenv";
-import { config } from "./environment";
 import path from "path";
+import { loadConfig } from "./environment";
+
 dotenv.config();
+
+const config = loadConfig();
 
 export const DATABASE_CONFIG = {
   host: config.database.host,

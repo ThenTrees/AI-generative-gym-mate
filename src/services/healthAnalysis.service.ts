@@ -1,9 +1,10 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { logger } from "../utils/logger";
-import { config } from "../configs/environment";
+import { loadConfig } from "../configs/environment";
 import { UserProfile } from "../types/model/userProfile.model";
 import { HealthConsideration } from "../types/model/healthConsideration";
 
+const config = loadConfig();
 /**
  * Service responsible for analyzing user health conditions
  * and generating health considerations for workout planning

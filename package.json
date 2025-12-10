@@ -11,6 +11,7 @@
     "test-rag": "ts-node src/scripts/testRAG.ts"
   },
   "dependencies": {
+    "zod": "^3.23.8",
     "@google/genai": "^1.21.0",
     "@google/generative-ai": "^0.24.1",
     "@langchain/community": "^0.3.56",

@@ -8,6 +8,8 @@ export function errorMiddleware(
   _next: NextFunction
 ) {
   const status = err.status || 500;
-  logger.error(err, "Unhandled error");
-  res.status(status).json({ error: err.message || "Internal Server Error" });
+  logger.error("Unhandled error", err);
+  res
+    .status(status)
+    .json({ success: false, message: err.message || "Internal Server Error" });
 }

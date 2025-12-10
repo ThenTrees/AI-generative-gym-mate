@@ -1,6 +1,7 @@
-import { Request, Response } from 'express';
-import locationService from '../services/location.service';
-import { logger } from '../utils/logger';
+import { Request, Response } from "express";
+import locationService from "../services/location.service";
+import { logger } from "../utils/logger";
+import { sendError, sendSuccess } from "../utils/response";
 
 export class LocationController {
   /**
@@ -33,25 +34,22 @@ export class LocationController {
       // Sort by distance
       gyms.sort((a, b) => a.distance - b.distance);
 
-      res.json({
-        success: true,
-        data: gyms,
-        message: `Found ${gyms.length} gyms near your location`,
-        meta: {
-          searchLocation: { latitude, longitude },
-          radius: radius,
-          type: type,
-          count: gyms.length
-        }
+      sendSuccess(res, `Found ${gyms.length} gyms near your location`, {
+        gyms,
+        searchLocation: { latitude, longitude },
+        radius: radius,
+        type: type,
+        count: gyms.length
       });
 
     } catch (error: any) {
-      logger.error('Error in search gyms endpoint:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Internal server error while searching for gyms',
-        error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
-      });
+      logger.error("Error in search gyms endpoint:", error);
+      sendError(
+        res,
+        "Internal server error while searching for gyms",
+        500,
+        process.env.NODE_ENV === "development" ? error.message : "Something went wrong"
+      );
     }
   }
 
@@ -76,26 +74,20 @@ export class LocationController {
       const details = await locationService.getPlaceDetails(id);
       
       if (!details || Object.keys(details).length === 0) {
-        res.status(404).json({
-          success: false,
-          message: 'Gym not found'
-        });
+        sendError(res, "Gym not found", 404);
         return;
       }
 
-      res.json({
-        success: true,
-        data: details,
-        message: 'Gym details retrieved successfully'
-      });
+      sendSuccess(res, "Gym details retrieved successfully", details);
 
     } catch (error: any) {
-      logger.error('Error in get gym details endpoint:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Internal server error while getting gym details',
-        error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
-      });
+      logger.error("Error in get gym details endpoint:", error);
+      sendError(
+        res,
+        "Internal server error while getting gym details",
+        500,
+        process.env.NODE_ENV === "development" ? error.message : "Something went wrong"
+      );
     }
   }
 
@@ -108,11 +100,7 @@ export class LocationController {
       const { latitude, longitude, address, timestamp } = req.body;
 
       if (!latitude || !longitude) {
-        res.status(400).json({
-          success: false,
-          message: 'Invalid request parameters',
-          errors: ['Latitude and longitude are required']
-        });
+        sendError(res, "Latitude and longitude are required", 400);
         return;
       }
 
@@ -125,19 +113,16 @@ export class LocationController {
         timestamp: timestamp || new Date().toISOString()
       });
 
-      res.json({
-        success: true,
-        data: result,
-        message: 'Location saved successfully'
-      });
+      sendSuccess(res, "Location saved successfully", result);
 
     } catch (error: any) {
-      logger.error('Error in save location endpoint:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Internal server error while saving location',
-        error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
-      });
+      logger.error("Error in save location endpoint:", error);
+      sendError(
+        res,
+        "Internal server error while saving location",
+        500,
+        process.env.NODE_ENV === "development" ? error.message : "Something went wrong"
+      );
     }
   }
 
@@ -149,25 +134,22 @@ export class LocationController {
     try {
       const hasApiKey = !!process.env.GEOAPIFY_API_KEY;
       
-      res.json({
-        success: true,
-        data: {
-          service: 'location',
-          status: 'healthy',
-          geoapifyApi: hasApiKey ? 'configured' : 'not_configured',
-          apiProvider: 'Geoapify Places API',
-          timestamp: new Date().toISOString()
-        },
-        message: 'Location service is healthy'
+      sendSuccess(res, "Location service is healthy", {
+        service: "location",
+        status: "healthy",
+        geoapifyApi: hasApiKey ? "configured" : "not_configured",
+        apiProvider: "Geoapify Places API",
+        timestamp: new Date().toISOString()
       });
 
     } catch (error: any) {
-      logger.error('Error in location health check:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Location service health check failed',
-        error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
-      });
+      logger.error("Error in location health check:", error);
+      sendError(
+        res,
+        "Location service health check failed",
+        500,
+        process.env.NODE_ENV === "development" ? error.message : "Something went wrong"
+      );
     }
   }
 }
