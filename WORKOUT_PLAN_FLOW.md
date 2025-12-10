@@ -59,7 +59,10 @@ const goal = await mealPlanGenerator.getGoalByUser(request.userId);
 
 **Dữ liệu quan trọng từ Goal:**
 
-- `objectiveType`: BUILD_MUSCLE, LOSE_WEIGHT, IMPROVE_STRENGTH, etc.
+- `objectiveType`: LOSE_FAT,
+  GAIN_MUSCLE,
+  ENDURANCE,
+  MAINTAIN
 - `sessionsPerWeek`: Số buổi tập/tuần (2-6)
 - `sessionMinutes`: Thời gian mỗi buổi tập (30-120 phút)
 

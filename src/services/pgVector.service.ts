@@ -311,7 +311,6 @@ export class PgVectorService {
                       e.name,
                       e.primary_muscle,
                       m.name as primary_muscle_name,
-                      e.secondary_muscles,
                       e.equipment,
                       e.body_part,
                       e.exercise_category,
