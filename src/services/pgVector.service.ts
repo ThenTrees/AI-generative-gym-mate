@@ -184,6 +184,13 @@ export class PgVectorService {
         // Fixed: Use corrected embed method
         const embedding = await this.embed(content);
 
+        const difficultyMap = {
+          1: "BEGINNER",
+          2: "INTERMEDIATE",
+          3: "ADVANCED",
+          4: "EXPERT",
+        };
+
         const metadata = {
           slug: exercise.slug,
           name: exercise.name,
@@ -191,7 +198,10 @@ export class PgVectorService {
           equipment: exercise.equipment.name,
           bodyPart: exercise.bodyPart,
           exerciseCategory: exercise.exerciseCategory.name,
-          difficultyLevel: exercise.difficultyLevel,
+          difficultyLevel:
+            difficultyMap[
+              exercise.difficultyLevel as keyof typeof difficultyMap
+            ] || "UNKNOWN",
         };
 
         // Upsert to database
