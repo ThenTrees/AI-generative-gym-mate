@@ -6,6 +6,7 @@ import { ExerciseLoader } from "../loaders/exerciseLoader";
 import { EmbeddingDocument } from "../types/model/embeddingDocument.model";
 import { logger } from "../utils/logger";
 import { loadConfig } from "../configs/environment";
+import { Muscle } from "../types/model/muscle.model";
 const config = loadConfig();
 types.setTypeParser(1082, (val) => val);
 export class PgVectorService {
@@ -186,10 +187,10 @@ export class PgVectorService {
         const metadata = {
           slug: exercise.slug,
           name: exercise.name,
-          primaryMuscle: exercise.primaryMuscle,
-          equipment: exercise.equipment,
+          primaryMuscle: exercise.primaryMuscle.name,
+          equipment: exercise.equipment.name,
           bodyPart: exercise.bodyPart,
-          exerciseCategory: exercise.exerciseCategory,
+          exerciseCategory: exercise.exerciseCategory.name,
           difficultyLevel: exercise.difficultyLevel,
         };
 
@@ -299,6 +300,8 @@ export class PgVectorService {
                       e.slug,
                       e.name,
                       e.primary_muscle,
+                      m.name as primary_muscle_name,
+                      e.secondary_muscles,
                       e.equipment,
                       e.body_part,
                       e.exercise_category,
@@ -310,6 +313,7 @@ export class PgVectorService {
                       e.tags,
                       e.alternative_names
                     FROM exercises e
+                    LEFT JOIN muscles m ON e.primary_muscle = m.code
                     WHERE e.id = ANY($1::uuid[])
                       AND e.is_deleted = false
                   `;
@@ -321,7 +325,9 @@ export class PgVectorService {
         name: row.name,
         primaryMuscle: {
           code: row.primary_muscle,
+          name: row.primary_muscle_name,
         },
+        secondaryMuscles: row.secondary_muscles || [],
         equipment: {
           code: row.equipment,
           name: row.equipment_name,
@@ -329,6 +335,7 @@ export class PgVectorService {
         bodyPart: row.body_part,
         exerciseCategory: {
           code: row.exercise_category,
+          name: row.category_name,
         },
         difficultyLevel: row.difficulty_level,
         instructions: row.instructions,
@@ -337,7 +344,6 @@ export class PgVectorService {
         benefits: row.benefits,
         tags: row.tags || [],
         alternativeNames: row.alternative_names || [], // TODO:
-        secondaryMuscles: row.secondary_muscles || [], // TODO:
       }));
     } finally {
       client.release();

@@ -1,6 +1,7 @@
 import { Client } from "pg";
 import { DATABASE_CONFIG } from "../configs/database";
 import { Exercise } from "../types/model/exercise.model";
+import { Muscle } from "../types/model/muscle.model";
 
 export class ExerciseLoader {
   private client: Client;
@@ -20,6 +21,7 @@ export class ExerciseLoader {
           e.slug,
           e.name,
           e.primary_muscle,
+          m.name as primary_muscle_name,
           e.equipment,
           e.body_part,
           e.exercise_category,
@@ -53,9 +55,8 @@ export class ExerciseLoader {
           name: row.name,
           primaryMuscle: {
             code: row.primary_muscle,
+            name: row.primary_muscle_name,
           },
-          secondaryMuscles: [],
-
           equipment: {
             code: row.equipment,
             name: row.equipment_name,
@@ -65,8 +66,9 @@ export class ExerciseLoader {
 
           exerciseCategory: {
             code: row.exercise_category,
+            name: row.category_name,
           },
-
+          secondaryMuscles: [],
           difficultyLevel: row.difficulty_level,
           instructions: row.instructions,
           safetyNotes: row.safety_notes,
@@ -89,12 +91,14 @@ export class ExerciseLoader {
   createExerciseContent(exercise: Exercise): string {
     const parts = [
       `Exercise: ${exercise.name}`,
-      `Primary Muscle: ${exercise.primaryMuscle}`,
+      `Primary Muscle: ${exercise.primaryMuscle.name}`,
       `Body Part: ${exercise.bodyPart}`,
-      `Equipment: ${exercise.equipment}`,
-      `Category: ${exercise.exerciseCategory}`,
+      `Equipment: ${exercise.equipment.name}`,
+      `Category: ${exercise.exerciseCategory.name}`,
       `Difficulty: ${exercise.difficultyLevel}/5`,
-      `Secondary Muscle: ${exercise.secondaryMuscles}`,
+      `Secondary Muscle: ${exercise.secondaryMuscles
+        .map((muscle: Muscle) => muscle.name)
+        .join(", ")}`,
     ];
 
     if (exercise.instructions) {
