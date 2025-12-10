@@ -11,6 +11,7 @@ export interface Exercise {
   equipment: Equipment;
   bodyPart: string;
   exerciseCategory: ExerciseCategory;
+  exerciseType?: string; // BODYWEIGHT, CARDIO, COMPOUND, FREEWEIGHT, ISOLATION, MACHINE, PLYOMETRIC, STRETCH
   difficultyLevel: number; // or 1-5
   instructions?: string[];
   safetyNotes?: string;
@@ -18,7 +19,4 @@ export interface Exercise {
   benefits?: string;
   tags?: string[];
   alternativeNames?: string[];
-
-  // description: string;
-  // exerciseType: string;
 }
