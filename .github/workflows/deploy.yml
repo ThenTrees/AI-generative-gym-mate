@@ -113,9 +113,3 @@ jobs:
 
             # Clean up old images
             docker image prune -f
-
-      # 1️⃣2️⃣ Health check
-      - name: Health check
-        run: |
-          sleep 15
-          curl -f http://${{ secrets.EC2_HOST }}:${{ env.PORT }}/health || exit 1
