@@ -3,7 +3,7 @@ name: CI/CD to EC2
 on:
   push:
     branches:
-      - main # Chạy CI/CD khi push code lên main
+      - master # Chạy CI/CD khi push code lên master
   workflow_dispatch:
 
 jobs:
