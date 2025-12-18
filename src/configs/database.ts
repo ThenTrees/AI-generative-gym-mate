@@ -18,7 +18,7 @@ export const DATABASE_CONFIG = {
     ca: fs
       .readFileSync(
         path.resolve(
-          process.env.DB_SSL_CERT || "./certs/ap-southeast-1-bundle.pem"
+          process.env.DB_SSL_CERT || "/app/certs/ap-southeast-1-bundle.pem"
         )
       )
       .toString(),

@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { logger } from "../utils/logger";
 import { sendError, sendSuccess } from "../utils/response";
 import { PlanRequest } from "../types/request/planRequest";
-import WorkoutPlanGeneratorService from "../services/WorkoutPlanGenerator.service";
+import WorkoutPlanGeneratorService from "../services/workoutPlanGenerator.service";
 
 class GymPlanController {
   constructor() {
