@@ -39,4 +39,4 @@ COPY --from=builder /app/certs ./certs
 EXPOSE 3000
 
 # Start app
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/app.js"]
