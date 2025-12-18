@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: gym-rag-postgres
+    environment:
+      POSTGRES_DB: ${MAIN_DB_NAME:-gymhealthtech}
+      POSTGRES_USER: ${MAIN_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${MAIN_DB_PASSWORD:-root}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${MAIN_DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MAIN_DB_USER:-postgres} -d ${MAIN_DB_NAME:-gymhealthtech}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gym-rag-network
+    restart: unless-stopped
+
+  # Redis for caching (optional but recommended)
+  redis:
+    image: redis:7-alpine
+    container_name: gym-rag-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - gym-rag-network
+    restart: unless-stopped
+
+  # Application service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: gym-rag-service
+    environment:
+      # Server config
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-8081}
+      
+      # Database config
+      MAIN_DB_HOST: postgres
+      MAIN_DB_PORT: ${MAIN_DB_PORT:-5432}
+      MAIN_DB_NAME: ${MAIN_DB_NAME:-gymhealthtech}
+      MAIN_DB_USER: ${MAIN_DB_USER:-postgres}
+      MAIN_DB_PASSWORD: ${MAIN_DB_PASSWORD:-root}
+      
+      # Gemini API config
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-text-embedding-004}
+      GEMINI_TEMPERATURE: ${GEMINI_TEMPERATURE:-0.7}
+      GEMINI_MAX_TOKENS: ${GEMINI_MAX_TOKENS:-2500}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-text-embedding-004}
+      
+      # Redis config (if using cache)
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      
+      # Logging config
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENABLE_CONSOLE_LOG: ${ENABLE_CONSOLE_LOG:-true}
+      ENABLE_FILE_LOG: ${ENABLE_FILE_LOG:-false}
+      
+      # Sync config
+      ENABLE_AUTO_SYNC: ${ENABLE_AUTO_SYNC:-false}
+      SYNC_INTERVAL_HOURS: ${SYNC_INTERVAL_HOURS:-24}
+      RUN_BATCH: ${RUN_BATCH:-false}
+      
+      # API config
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-900000}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      
+      # SSL config (optional, for external DB)
+      DB_SSL_CERT: ${DB_SSL_CERT:-./certs/ap-southeast-1-bundle.pem}
+    ports:
+      - "${PORT:-8081}:8081"
+    volumes:
+      # Mount source code for development (optional)
+      # - ./src:/app/src:ro
+      # - ./app.ts:/app/app.ts:ro
+      # Mount certs if needed
+      - ./certs:/app/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - gym-rag-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8081/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  gym-rag-network:
+    driver: bridge
+
