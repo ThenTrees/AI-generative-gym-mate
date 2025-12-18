@@ -36,7 +36,7 @@ export type AppConfig = ReturnType<typeof buildConfig>;
 const buildConfig = () => {
   const env = process.env;
   return {
-    port: parseInt(env.PORT || "3001", 10),
+    port: parseInt(env.PORT || "3000", 10),
     nodeEnv: env.NODE_ENV || "development",
     database: {
       host: env.MAIN_DB_HOST || "localhost",
