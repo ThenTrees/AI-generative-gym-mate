@@ -25,7 +25,7 @@ RUN npx tsc app.ts --outDir ./dist --module commonjs --target ES2020 \
 # ======================
 # Stage 2: Production
 # ======================
-FROM node:20-alpine
+FROM node:20-alpine AS production
 
 WORKDIR /app
 
