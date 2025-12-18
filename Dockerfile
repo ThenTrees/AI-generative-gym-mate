@@ -1,20 +1,42 @@
-FROM node:20-alpine
+# ======================
+# 1️⃣ BUILD STAGE
+# ======================
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files trước để cache layer
-COPY package*.json ./
+# Copy dependency files
+COPY package.json package-lock.json ./
 
+# Install dependencies (exact versions)
 RUN npm ci
 
-# Copy source
+# Copy source code
 COPY . .
 
-# 🔥 BẮT BUỘC: build TypeScript → dist/
+# Build TypeScript → dist/
 RUN npm run build
 
-# App chạy port 3000
+
+# ======================
+# 2️⃣ RUNTIME STAGE
+# ======================
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+# Set production env
+ENV NODE_ENV=production
+
+# Copy only what is needed to run
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/package-lock.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/certs ./certs
+
+# Expose service port (đổi nếu app bạn khác)
 EXPOSE 3000
 
-# 🔥 File này PHẢI tồn tại sau build
+# Start app
 CMD ["node", "dist/index.js"]
