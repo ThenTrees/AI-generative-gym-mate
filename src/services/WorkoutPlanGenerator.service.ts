@@ -6,20 +6,12 @@ import { logger } from "../utils/logger";
 import { PlanRequest } from "../types/request/planRequest";
 import { Goal } from "../types/model/goal.model";
 import { UserProfile } from "../types/model/userProfile.model";
-import {
-  FitnessLevel,
-  Gender,
-  Intensity,
-  Objective,
-} from "../common/common-enum";
+import { FitnessLevel, Objective } from "../common/common-enum";
 import { ExerciseWithScore } from "../types/model/exerciseWithScore";
-import { Exercise } from "../types/model/exercise.model";
 import { PlanDay } from "../types/model/planDay.model";
 import { PlanItem } from "../types/model/planItem.model";
-import { Prescription } from "../types/model/prescription";
 import { IntensityLevel } from "../types/model/intensityLevel";
 import { SessionStructure } from "../types/model/sessionStructure";
-import { HealthConsideration } from "../types/model/healthConsideration";
 import { VolumeTargets } from "../types/model/volumeTargets";
 import { RestPeriods } from "../types/model/restPeriods";
 import { WorkoutCalculator } from "../utils/calculators";
@@ -849,7 +841,7 @@ class WorkoutPlanGeneratorService {
 
     let customization = "No customization applied";
     if (generatedTitle !== selectedTemplate) {
-      const customizations = [];
+      const customizations: string[] = [];
       if (suggestedWeeks >= 12) customizations.push("Duration suffix");
       if (suggestedWeeks >= 8) customizations.push("Challenge suffix");
       if (sessionsPerWeek <= 2) customizations.push("Low frequency");

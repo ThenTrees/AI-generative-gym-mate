@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { logger } from "../utils/logger";
 import { sendError, sendSuccess } from "../utils/response";
 import { PlanRequest } from "../types/request/planRequest";
-import workoutPlanGeneratorService from "../services/WorkoutPlanGenerator.service";
+import WorkoutPlanGeneratorService from "../services/WorkoutPlanGenerator.service";
 
 class GymPlanController {
   constructor() {
@@ -22,7 +22,7 @@ class GymPlanController {
         `[Controller] - Generating workout plan for user ${planRequest.userId}`
       );
       const startTime = Date.now();
-      const workoutPlan = await workoutPlanGeneratorService.generateWorkoutPlan(
+      const workoutPlan = await WorkoutPlanGeneratorService.generateWorkoutPlan(
         planRequest
       );
       const generationTime = Date.now() - startTime;

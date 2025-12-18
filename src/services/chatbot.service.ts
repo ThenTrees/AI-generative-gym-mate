@@ -5,7 +5,7 @@ import knowledgeBase from "./knowledgeBase.service";
 import { PgVectorService } from "./pgVector.service";
 import { knowledgeVectorService } from "./knowledgeVector.service";
 import { foodVectorService } from "./foodVector.service";
-import { NutritionCalculationService } from "./NutritionCalculation.service";
+import { NutritionCalculationService } from "./nutritionCalculation.service";
 import { Objective } from "../common/common-enum";
 import { NUTRITION_CONSTANTS } from "../utils/nutritionConstants";
 import { v4 as uuidv4 } from "uuid";
@@ -149,30 +149,29 @@ class ChatbotService {
       ) {
         // Format exercises properly like in backend-ai
         response.exercises = exerciseAnalysis.exercises.map((ex: any) => ({
-        id: ex.id || `ex-${Date.now()}`,
-        name: ex.name,
-        description: ex.description || ex.exercise_description || "",
+          id: ex.id || `ex-${Date.now()}`,
+          name: ex.name,
+          description: ex.description || ex.exercise_description || "",
 
-        muscle_groups: Array.isArray(ex.muscle_groups)
-          ? ex.muscle_groups
-          : typeof ex.muscle_groups === "string"
-          ? ex.muscle_groups.split(",").map((v: string) => v.trim())
-          : [],
+          muscle_groups: Array.isArray(ex.muscle_groups)
+            ? ex.muscle_groups
+            : typeof ex.muscle_groups === "string"
+            ? ex.muscle_groups.split(",").map((v: string) => v.trim())
+            : [],
 
-        equipment_list: Array.isArray(ex.equipment_list)
-          ? ex.equipment_list
-          : typeof ex.equipment_list === "string"
-          ? ex.equipment_list.split(",").map((v: string) => v.trim())
-          : [],
+          equipment_list: Array.isArray(ex.equipment_list)
+            ? ex.equipment_list
+            : typeof ex.equipment_list === "string"
+            ? ex.equipment_list.split(",").map((v: string) => v.trim())
+            : [],
 
-        thumbnail_url: ex.thumbnail_url || ex.image_url || "",
-        exercise_type: ex.exercise_type || ex.exercise_category || "general",
-        difficulty: ex.difficulty || "intermediate",
-        instructions: ex.instructions || "",
-        sets_recommended: ex.sets_recommended || "3",
-        reps_recommended: ex.reps_recommended || "10-12",
-      }));
-
+          thumbnail_url: ex.thumbnail_url || ex.image_url || "",
+          exercise_type: ex.exercise_type || ex.exercise_category || "general",
+          difficulty: ex.difficulty || "intermediate",
+          instructions: ex.instructions || "",
+          sets_recommended: ex.sets_recommended || "3",
+          reps_recommended: ex.reps_recommended || "10-12",
+        }));
 
         response.exerciseType = exerciseAnalysis.targetMuscleGroup;
         response.hasExercises = true;

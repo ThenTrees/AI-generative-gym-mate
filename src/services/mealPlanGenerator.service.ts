@@ -12,13 +12,13 @@ import {
   NutritionCalculationService,
   NutritionTarget as CalculatedNutritionTarget,
   MealNutrition,
-} from "./NutritionCalculation.service";
+} from "./nutritionCalculation.service";
+import { UserProfile } from "../types/model/userProfile.model";
+import { Goal } from "../types/model/goal.model";
 import {
   MealContext,
   MealRecommendationService,
-} from "./MealRecommendation.service";
-import { UserProfile } from "../types/model/userProfile.model";
-import { Goal } from "../types/model/goal.model";
+} from "./mealRecommendation.service";
 types.setTypeParser(1082, (val) => val);
 export class MealPlanGenerator {
   private pool: Pool;
