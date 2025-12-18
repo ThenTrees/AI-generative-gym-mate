@@ -1,40 +1,20 @@
-# ---------- Builder ----------
-FROM node:20-alpine AS builder
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package.json only
-COPY package.json ./
+# Copy package files trước để cache layer
+COPY package*.json ./
 
-# Install all dependencies
-RUN npm install
+RUN npm ci
 
-# Copy source code
+# Copy source
 COPY . .
 
-# Build app (nếu có step build)
-# Nếu app bạn không có build step thì có thể xoá dòng này
+# 🔥 BẮT BUỘC: build TypeScript → dist/
 RUN npm run build
 
-
-# ---------- Production ----------
-FROM node:20-alpine AS production
-
-WORKDIR /app
-
-# Copy package.json only
-COPY package.json ./
-
-# Install production dependencies only
-RUN npm install --omit=dev && npm cache clean --force
-
-# Copy built app from builder
-COPY --from=builder /app/dist ./dist
-# Nếu app bạn không có dist, đổi thành:
-# COPY --from=builder /app ./
-
+# App chạy port 3000
 EXPOSE 3000
 
+# 🔥 File này PHẢI tồn tại sau build
 CMD ["node", "dist/index.js"]
-# hoặc
-# CMD ["npm", "start"]
