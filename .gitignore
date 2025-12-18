@@ -1,7 +1,6 @@
 node_modules
 /.env
 dist
-certs
 DEPLOYMENT.md
 EXERCISE_SELECTION_LOGIC_UPDATE.md
 MEAL_PLAN_BUSINESS_RULES.md

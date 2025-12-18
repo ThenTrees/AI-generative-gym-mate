@@ -57,3 +57,5 @@ docker-compose*.yml
 .temp
 tmp
 
+certs/*
+!certs/.keep
