@@ -54,6 +54,3 @@ docker-compose*.yml
 .cache
 .temp
 tmp
-
-certs/*
-!certs/.keep
